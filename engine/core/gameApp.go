@@ -2,7 +2,7 @@ package core
 
 import (
 	"errors"
-	"fmt"
+	"log/slog"
 	"runtime"
 
 	ectx "tiny_farm/engine/context"
@@ -20,12 +20,19 @@ type GameApp struct {
 	isRunning bool
 	// fpsManager 负责本轮主循环的控帧和 dt 计算。
 	fpsManager *FPS
+	// frameCount 用于统计一段时间内累计跑了多少帧。
+	frameCount int
+	// deltaTimeSum 用于累计这一段时间内的 dt 总和。
+	deltaTimeSum float64
+	// statInterval 用于控制多久输出一次统计信息。
+	statInterval float64
 }
 
 // NewGameApp 创建应用实例，并初始化帧率控制器。
 func NewGameApp() *GameApp {
 	return &GameApp{
-		fpsManager: NewFPS(),
+		fpsManager:   NewFPS(),
+		statInterval: 1.0,
 	}
 }
 
@@ -36,8 +43,8 @@ func (a *GameApp) RegisterSceneSetup(fn sceneSetupFunc) {
 
 // Run 启动唯一主循环。
 //
-// 当前版本只验证主循环和相对帧率方案是否工作，
-// 所以每轮只更新 FPS 并输出 delta time 观察结果。
+// 当前版本继续使用相对帧率方案，但不再逐帧打印 dt。
+// 为了观察运行效果，统计信息改成低频输出，尽量减少对主循环的干扰。
 func (a *GameApp) Run() {
 	if err := a.init(); err != nil {
 		return
@@ -50,8 +57,32 @@ func (a *GameApp) Run() {
 	for a.isRunning {
 		a.fpsManager.Update()
 		deltaTime := a.fpsManager.GetDeltaTime()
-		fmt.Printf("deltaTime: %f\n", deltaTime)
+		a.tick(deltaTime)
 	}
+}
+
+// tick 是单帧逻辑入口。
+// 当前先只做帧统计，后续输入、逻辑、渲染、事件分发都应接在这里。
+func (a *GameApp) tick(deltaTime float64) {
+	a.frameCount++
+	a.deltaTimeSum += deltaTime
+
+	if a.deltaTimeSum < a.statInterval {
+		return
+	}
+
+	avgDeltaTime := a.deltaTimeSum / float64(a.frameCount)
+	avgFps := float64(a.frameCount) / a.deltaTimeSum
+
+	slog.Info(
+		"frame stats",
+		slog.Int("frames", a.frameCount),
+		slog.Float64("avgDeltaTime", avgDeltaTime),
+		slog.Float64("avgFps", avgFps),
+	)
+
+	a.frameCount = 0
+	a.deltaTimeSum = 0.0
 }
 
 // init 完成运行前的最小初始化。
