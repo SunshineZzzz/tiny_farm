@@ -47,9 +47,15 @@ func (a *GameApp) RegisterSceneSetup(fn sceneSetupFunc) {
 // 为了观察运行效果，统计信息改成低频输出，尽量减少对主循环的干扰。
 func (a *GameApp) Run() {
 	if err := a.init(); err != nil {
+		slog.Error("game app init failed", slog.Any("err", err))
 		return
 	}
 	defer a.close()
+
+	slog.Debug(
+		"game app run",
+		slog.Int("targetFps", a.fpsManager.GetTargetFps()),
+	)
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -92,15 +98,26 @@ func (a *GameApp) init() error {
 	}
 
 	a.isRunning = true
+
+	slog.Debug(
+		"game app init",
+		slog.Bool("isRunning", a.isRunning),
+	)
 	return nil
 }
 
 // initTimer 初始化当前版本使用的帧率参数。
 func (a *GameApp) initTimer() bool {
 	a.fpsManager.SetTargetFps(60)
+	slog.Debug("fps manager init success", slog.Int("targetFps", a.fpsManager.GetTargetFps()))
 	return true
 }
 
 // close 预留给后续资源释放逻辑。
 func (a *GameApp) close() {
+	if a.isRunning {
+		slog.Warn("game app is running, close")
+	}
+
+	slog.Debug("game app closed", slog.Bool("isRunning", a.isRunning))
 }
