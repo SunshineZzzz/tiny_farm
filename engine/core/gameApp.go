@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	ectx "tiny_farm/engine/context"
+	"tiny_farm/engine/utils/events"
 )
 
 // sceneSetupFunc 用于把游戏层初始化逻辑注入到引擎入口。
@@ -20,6 +21,8 @@ type GameApp struct {
 	isRunning bool
 	// fpsManager 负责本轮主循环的控帧和 dt 计算。
 	fpsManager *FPS
+	// dispatcher 事件分发器。
+	dispatcher *events.Dispatcher
 	// frameCount 用于统计一段时间内累计跑了多少帧。
 	frameCount int
 	// deltaTimeSum 用于累计这一段时间内的 dt 总和。
@@ -63,13 +66,17 @@ func (a *GameApp) Run() {
 	for a.isRunning {
 		a.fpsManager.Update()
 		deltaTime := a.fpsManager.GetDeltaTime()
-		a.tick(deltaTime)
+
+		// 分发 enqueue 的事件，这个放到最后执行
+		a.dispatcher.Update()
+
+		// 帧率统计
+		a.frameStats(deltaTime)
 	}
 }
 
-// tick 是单帧逻辑入口。
-// 当前先只做帧统计，后续输入、逻辑、渲染、事件分发都应接在这里。
-func (a *GameApp) tick(deltaTime float64) {
+// 帧率统计
+func (a *GameApp) frameStats(deltaTime float64) {
 	a.frameCount++
 	a.deltaTimeSum += deltaTime
 
@@ -96,6 +103,9 @@ func (a *GameApp) init() error {
 	if !a.initTimer() {
 		return errors.New("init timer failed")
 	}
+	if !a.initDispatcher() {
+		return errors.New("init dispatcher failed")
+	}
 
 	a.isRunning = true
 
@@ -113,6 +123,13 @@ func (a *GameApp) initTimer() bool {
 	return true
 }
 
+// initDispatcher 初始化事件分发器。
+func (a *GameApp) initDispatcher() bool {
+	a.dispatcher = events.NewDispatcher()
+	slog.Debug("dispatcher init success")
+	return true
+}
+
 // close 预留给后续资源释放逻辑。
 func (a *GameApp) close() {
 	if a.isRunning {
@@ -120,4 +137,6 @@ func (a *GameApp) close() {
 	}
 
 	slog.Debug("game app closed", slog.Bool("isRunning", a.isRunning))
+
+	a.isRunning = false
 }
