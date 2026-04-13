@@ -10,7 +10,7 @@ type testEventB struct {
 	Name string
 }
 
-// 验证 Connect 注册的监听器会被 Trigger 立即同步调用。
+// 验证 Connect 注册的监听器会被 Trigger 立即同步调用
 func TestSinkConnectAndTrigger(t *testing.T) {
 	dispatcher := NewDispatcher()
 	called := false
@@ -32,7 +32,7 @@ func TestSinkConnectAndTrigger(t *testing.T) {
 	}
 }
 
-// 验证 Enqueue 只入队，直到类型化 Update 才派发。
+// 验证 Enqueue 只入队，直到类型化 Update 才派发
 func TestEnqueueWaitsForUpdate(t *testing.T) {
 	dispatcher := NewDispatcher()
 	called := false
@@ -52,7 +52,7 @@ func TestEnqueueWaitsForUpdate(t *testing.T) {
 	}
 }
 
-// 验证 Dispatcher.Update 会派发当前所有事件队列。
+// 验证 Dispatcher Update 会派发当前所有事件队列
 func TestDispatcherUpdateDispatchesAllQueuedEvents(t *testing.T) {
 	dispatcher := NewDispatcher()
 	var received []string
@@ -73,7 +73,7 @@ func TestDispatcherUpdateDispatchesAllQueuedEvents(t *testing.T) {
 	}
 }
 
-// 验证同一事件队列内的事件按入队顺序派发。
+// 验证同一事件队列内的事件按入队顺序派发
 func TestDispatcherUpdateKeepsOrderInSameQueue(t *testing.T) {
 	dispatcher := NewDispatcher()
 	var received []int
@@ -98,7 +98,7 @@ func TestDispatcherUpdateKeepsOrderInSameQueue(t *testing.T) {
 	}
 }
 
-// 验证派发回调中新入队的事件留到下一次 Update。
+// 验证派发回调中新入队的事件留到下一次 Update
 func TestEnqueueDuringUpdateWaitsForNextUpdate(t *testing.T) {
 	dispatcher := NewDispatcher()
 	var received []int
@@ -124,7 +124,7 @@ func TestEnqueueDuringUpdateWaitsForNextUpdate(t *testing.T) {
 	}
 }
 
-// 验证 Release 后对应监听器不再接收事件。
+// 验证 Release 后对应监听器不再接收事件
 func TestConnectionReleaseStopsDispatch(t *testing.T) {
 	dispatcher := NewDispatcher()
 	called := false
@@ -140,7 +140,7 @@ func TestConnectionReleaseStopsDispatch(t *testing.T) {
 	}
 }
 
-// 验证同一 sink 上的监听器按注册顺序执行。
+// 验证同一 sink 上的监听器按注册顺序执行
 func TestListenersRunInConnectOrder(t *testing.T) {
 	dispatcher := NewDispatcher()
 	var received []int
@@ -168,7 +168,7 @@ func TestListenersRunInConnectOrder(t *testing.T) {
 	}
 }
 
-// 验证派发中释放监听器不会破坏本轮遍历。
+// 验证派发中释放监听器不会破坏本轮遍历
 func TestReleaseDuringDispatchSkipsReleasedListener(t *testing.T) {
 	dispatcher := NewDispatcher()
 	var received []int
@@ -192,7 +192,7 @@ func TestReleaseDuringDispatchSkipsReleasedListener(t *testing.T) {
 	}
 }
 
-// 验证派发中 Disconnect 会跳过本轮剩余监听器。
+// 验证派发中 Disconnect 会跳过本轮剩余监听器
 func TestDisconnectDuringDispatchSkipsRemainingListeners(t *testing.T) {
 	dispatcher := NewDispatcher()
 	var received []int
@@ -217,7 +217,7 @@ func TestDisconnectDuringDispatchSkipsRemainingListeners(t *testing.T) {
 	}
 }
 
-// 验证 Disconnect 会清空当前 sink 上的全部监听器。
+// 验证 Disconnect 会清空当前 sink 上的全部监听器
 func TestSinkDisconnectClearsListeners(t *testing.T) {
 	dispatcher := NewDispatcher()
 	called := false
@@ -234,7 +234,7 @@ func TestSinkDisconnectClearsListeners(t *testing.T) {
 	}
 }
 
-// TestNamedQueuesAreIndependent 验证同一事件类型下不同队列互不影响。
+// 验证同一事件类型下不同队列互不影响
 func TestNamedQueuesAreIndependent(t *testing.T) {
 	dispatcher := NewDispatcher()
 	defaultCount := 0
@@ -267,7 +267,7 @@ func TestNamedQueuesAreIndependent(t *testing.T) {
 	}
 }
 
-// 验证 ClearType 只丢弃指定类型和队列中的待派发事件。
+// 验证 ClearType 只丢弃指定类型和队列中的待派发事件
 func TestClearTypeDropsQueuedEvents(t *testing.T) {
 	dispatcher := NewDispatcher()
 	called := false

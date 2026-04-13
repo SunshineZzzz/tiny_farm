@@ -8,20 +8,22 @@ import (
 	"tiny_farm/engine/core"
 )
 
-// initEnvironment 初始化当前游戏运行环境。
-// 当前主要是把日志系统准备好，便于观察启动流程。
+// 初始化当前游戏运行环境
 func initEnvironment() {
-	minLevel := slog.LevelDebug
-	// minLevel := slog.LevelInfo
+	// 初始化日志系统
+	{
+		minLevel := slog.LevelDebug
+		// 日志级别可改为 slog LevelInfo
 
-	options := &slog.HandlerOptions{
-		Level: minLevel,
+		options := &slog.HandlerOptions{
+			Level: minLevel,
+		}
+		handler := slog.NewTextHandler(os.Stdout, options)
+		slog.SetDefault(slog.New(handler))
 	}
-	handler := slog.NewTextHandler(os.Stdout, options)
-	slog.SetDefault(slog.New(handler))
 }
 
-// Run 是游戏层统一入口。
+// 游戏层统一入口
 func Run() {
 	initEnvironment()
 
@@ -30,7 +32,7 @@ func Run() {
 	app.Run()
 }
 
-// setupInitialScene 预留给后续初始场景装配逻辑。
+// 预留给后续初始化场景装配逻辑
 func setupInitialScene(ctx *ectx.Context) {
 	_ = ctx
 }
