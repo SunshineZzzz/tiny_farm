@@ -1,4 +1,4 @@
-package events
+package dispatch
 
 import (
 	"container/list"
