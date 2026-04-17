@@ -5,20 +5,23 @@ import (
 	"log/slog"
 	"runtime"
 
+	"tiny_farm/engine/abstract"
 	ectx "tiny_farm/engine/context"
+	"tiny_farm/engine/input"
 	"tiny_farm/engine/render/opengl"
-	"tiny_farm/engine/utils/events"
+	"tiny_farm/engine/utils/dispatch"
+	"tiny_farm/engine/utils/event"
 
 	"github.com/SunshineZzzz/purego-sdl3/sdl"
 	"github.com/go-gl/mathgl/mgl32"
 )
 
-// 用于把游戏层初始化逻辑注入到引擎入口
+// 把游戏层初始化逻辑注入到引擎入口
 type sceneSetupFunc func(*ectx.Context)
 
-// 是当前项目的应用壳
+// 当前项目的应用壳
 //
-// 当前阶段保留一个主循环，输入、逻辑、渲染、事件分发后续都走这个循环
+// 当前阶段保留一个主循环，输入、逻辑、渲染和事件分发后续都走这一个循环
 type GameApp struct {
 	// 预留给游戏层做启动时装配
 	sceneSetup sceneSetupFunc
@@ -35,7 +38,11 @@ type GameApp struct {
 	// 负责本轮主循环的控帧和 dt 计算
 	fpsManager *FPS
 	// 事件分发器
-	dispatcher *events.Dispatcher
+	dispatcher *dispatch.Dispatcher
+	// 管理 SDL 输入事件和动作状态
+	inputManager *input.InputManager
+	// 游戏状态
+	gameState *GameState
 
 	// 用于统计一段时间内累计跑了多少帧
 	frameCount int
@@ -79,17 +86,42 @@ func (a *GameApp) Run() {
 	)
 
 	for a.isRunning {
+		// 每帧节拍（从“玩家输入”到“屏幕呈现”）：
+		// 1) 时间推进：计算本帧 deltaTime（用于驱动更新）
+		// 2) 输入/事件：轮询 SDL 事件、更新动作状态，并触发必要的引擎事件（例如 Quit/WindowResized）
+		// 3) 更新：只更新栈顶场景（以及其系统/逻辑）；场景切换通过事件请求，在 update 末尾统一处理
+		// 4) 渲染：清屏 → 渲染场景/调试 UI → present
+		// 5) 分发队列事件：处理本帧 enqueue 的事件
+		//    TinyFarm 把 dispatcher.update 放在 render 之后：队列事件在“本帧画面已呈现”后才会被分发，
+		//    这样可以避免递归触发导致的时序混乱，并把大多数数据类事件自然变成“下一帧的输入”。
 		a.fpsManager.Update()
 		deltaTime := a.fpsManager.GetDeltaTime()
 
-		// 分发 enqueue 的事件，这个放到主循环后段执行
-		a.dispatcher.Update()
+		a.handleInputEvents()
+		a.update(deltaTime)
+		a.render()
 
-		// 渲染入口预留
+		// 分发 enqueue 的事件
+		// 在 update() 里 enqueue 了一个事件，它在"本帧画面画完之后"才会被处理。 换句话说，对于游戏逻辑而言，本帧 enqueue 的事件，是给下一帧用的输入。
+		// 因为这样可以保证：整个 update 阶段，所有系统都在同一个"数据快照"上运行，不会有人因为中途收到事件而看到不一致的状态。渲染完成后再结算，时序最清晰。
+		a.dispatcher.Update()
 
 		// 帧率统计
 		a.frameStats(deltaTime)
 	}
+}
+
+// 处理并分发输入事件
+func (a *GameApp) handleInputEvents() {
+	a.inputManager.Update()
+}
+
+// 更新游戏状态
+func (a *GameApp) update(deltaTime float64) {
+}
+
+// 渲染
+func (a *GameApp) render() {
 }
 
 // 低频输出当前主循环帧率统计
@@ -137,9 +169,22 @@ func (a *GameApp) init() error {
 		return err
 	}
 
+	if err := a.initGameState(); err != nil {
+		return err
+	}
+
 	if err := a.initGLRenderer(); err != nil {
 		return err
 	}
+
+	if err := a.initInputManager(); err != nil {
+		return err
+	}
+
+	// 注册退出事件
+	dispatch.SinkOf[event.QuitEvent](a.dispatcher).Connect(a.onQuitEvent)
+	// 注册窗口大小变化事件：更新 OpenGL 渲染器视口
+	dispatch.SinkOf[event.WindowResizedEvent](a.dispatcher).Connect(a.onWindowResizedEvent)
 
 	a.isRunning = true
 
@@ -147,6 +192,43 @@ func (a *GameApp) init() error {
 		"game app init",
 		slog.Bool("isRunning", a.isRunning),
 	)
+	return nil
+}
+
+// 处理退出事件
+func (a *GameApp) onQuitEvent(event.QuitEvent) {
+	slog.Info("quit event received, game app exit")
+	a.isRunning = false
+}
+
+// 处理窗口大小变化事件
+func (a *GameApp) onWindowResizedEvent(event event.WindowResizedEvent) {
+	// 使用像素大小更新 OpenGL 视口（高 DPI 下，window 坐标尺寸 ≠ drawable 像素尺寸）
+	w := event.Width
+	h := event.Height
+	if !event.PixelSizeChanged {
+		// 将窗口坐标转换为像素坐标（高DPI）
+		sdl.GetWindowSizeInPixels(a.window, &w, &h)
+	}
+	if a.glRenderer != nil {
+		a.glRenderer.Resize(w, h)
+	}
+}
+
+// 初始化游戏状态
+func (a *GameApp) initGameState() error {
+	a.gameState = NewGameState(a.window, abstract.GameStateTitle)
+	if a.gameState == nil {
+		return errors.New("create game state failed")
+	}
+	if a.config != nil {
+		logicalSize := mgl32.Vec2{
+			float32(a.config.Window.Width) * a.config.Window.WindowScale,
+			float32(a.config.Window.Height) * a.config.Window.WindowScale,
+		}
+		a.gameState.SetLogicalSize(logicalSize)
+	}
+	slog.Debug("game state init success")
 	return nil
 }
 
@@ -170,7 +252,7 @@ func (a *GameApp) initTimer() error {
 
 // 初始化事件分发器
 func (a *GameApp) initDispatcher() error {
-	a.dispatcher = events.NewDispatcher()
+	a.dispatcher = dispatch.NewDispatcher()
 	slog.Debug("dispatcher init success")
 	return nil
 }
@@ -199,10 +281,11 @@ func (a *GameApp) initSDL() error {
 func (a *GameApp) initGLRenderer() error {
 	// 获取逻辑分辨率，窗口大小乘以逻辑缩放比例
 	// 逻辑尺寸定义离屏渲染 FBO 的固定设计分辨率
-	// 窗口变化时逻辑分辨率保持一致，UI 和相机计算也保持一致
 	// 窗口缩放只影响窗口初始大小，逻辑缩放决定渲染质量
-	logicalSize := mgl32.Vec2{float32(a.config.Window.Width) * a.config.Window.LogicalScale,
-		float32(a.config.Window.Height) * a.config.Window.LogicalScale}
+	logicalSize := mgl32.Vec2{
+		float32(a.config.Window.Width) * a.config.Window.LogicalScale,
+		float32(a.config.Window.Height) * a.config.Window.LogicalScale,
+	}
 	glRenderer, err := opengl.NewGLRenderer(a.window, logicalSize, "config/render.json")
 	if err != nil {
 		return err
@@ -213,6 +296,13 @@ func (a *GameApp) initGLRenderer() error {
 	return nil
 }
 
+// 初始化输入管理器
+func (a *GameApp) initInputManager() error {
+	a.inputManager = input.NewInputManager(a.dispatcher, a.window, a.gameState)
+	slog.Debug("input manager init success")
+	return nil
+}
+
 // 释放应用持有的运行时资源
 func (a *GameApp) close() {
 	if a.isRunning {
@@ -220,6 +310,8 @@ func (a *GameApp) close() {
 	}
 
 	slog.Debug("game app closed", slog.Bool("isRunning", a.isRunning))
+
+	a.inputManager = nil
 
 	if a.glRenderer != nil {
 		a.glRenderer.Close()

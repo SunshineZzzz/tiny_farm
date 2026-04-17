@@ -10,7 +10,7 @@ game/entry.go                   游戏层入口和初始场景注册
 engine/core                     应用生命周期、主循环、配置、帧率控制
 engine/context                  运行时共享上下文
 engine/render/opengl            SDL OpenGL 上下文和渲染器骨架
-engine/utils/events             事件分发器
+engine/utils/dispatcher         事件分发器
 engine/utils/opengl             OpenGL 函数加载和调用接口
 config/window.json              窗口、图形和性能配置
 config/render.json              OpenGL 上下文初始化参数
@@ -88,4 +88,3 @@ go test -p 1 ./...
 6. 窗口可见性还依赖运行环境
 
    Windows 下需要确保 `SDL3.dll` 能被进程加载。当前建议通过设置 `PATH` 解决，后续可以把运行说明、开发脚本或构建输出目录整理清楚
-

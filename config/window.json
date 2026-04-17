@@ -1,8 +1,8 @@
 {
   "window": {
     "title": "TinyFarm",
-    "width": 1280,
-    "height": 720,
+    "width": 640,
+    "height": 360,
     "window_scale": 1.4,
     "logical_scale": 0.5,
     "resizable": true
