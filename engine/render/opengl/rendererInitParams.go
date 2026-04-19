@@ -37,6 +37,8 @@ type rendererInitParams struct {
 	FramebufferSRGBCapable int32 `json:"framebuffer_SRGB_capable"`
 	// 交换间隔，1 表示启用垂直同步，0 表示立即交换
 	SwapInterval int32 `json:"swap_interval"`
+	// 表示是否启用 OpenGL 调试上下文包装
+	DebugContext bool `json:"debug_context"`
 }
 
 // 对应渲染配置 JSON 根结构
@@ -59,6 +61,7 @@ func NewRendererInitParams() *rendererInitParams {
 		MultiSampleSamples:     0,
 		FramebufferSRGBCapable: 1,
 		SwapInterval:           1,
+		DebugContext:           false,
 	}
 }
 

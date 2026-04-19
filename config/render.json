@@ -10,6 +10,7 @@
     "multi_sample_buffers": 0,
     "multi_sample_samples": 0,
     "framebuffer_SRGB_capable": 1,
-    "swap_interval": 1
+    "swap_interval": 1,
+    "debug_context": true
   }
 }

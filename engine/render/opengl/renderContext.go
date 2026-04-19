@@ -129,6 +129,12 @@ func (rc *renderContext) createContext() error {
 		return fmt.Errorf("%s", err)
 	}
 
+	if rc.params.DebugContext {
+		glContext = &gl.DebugContext{
+			Context: glContext,
+		}
+	}
+
 	rc.glContext = glContext
 	return nil
 }
