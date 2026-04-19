@@ -127,6 +127,7 @@ func (a *GameApp) render() {
 	}
 
 	a.glRenderer.Clear()
+	a.glRenderer.DrawRect(mgl32.Vec4{32, 32, 96, 64}, mgl32.Vec4{0.9, 0.72, 0.32, 1.0})
 	a.glRenderer.Present()
 }
 

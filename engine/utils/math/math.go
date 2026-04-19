@@ -11,6 +11,37 @@ type FColor struct {
 	R, G, B, A float32
 }
 
+// 创建FColor
+func NewFColor(r, g, b float32, a float32) FColor {
+	return FColor{
+		R: r,
+		G: g,
+		B: b,
+		A: a,
+	}
+}
+
+// 从十六进制颜色值创建FColor
+func NewFColorByHex(hex uint32) FColor {
+	return FColor{
+		R: float32((hex>>24)&0xFF) / 255.0,
+		G: float32((hex>>16)&0xFF) / 255.0,
+		B: float32((hex>>8)&0xFF) / 255.0,
+		A: float32((hex & 0xFF)) / 255.0,
+	}
+}
+
+// -- 创建一些预设颜色，方便使用 ---
+func Red() FColor    { return NewFColor(1.0, 0.0, 0.0, 1.0) }
+func Green() FColor  { return NewFColor(0.0, 1.0, 0.0, 1.0) }
+func Blue() FColor   { return NewFColor(0.0, 0.0, 1.0, 1.0) }
+func White() FColor  { return NewFColor(1.0, 1.0, 1.0, 1.0) }
+func Black() FColor  { return NewFColor(0.0, 0.0, 0.0, 1.0) }
+func Purple() FColor { return NewFColor(1.0, 0.0, 1.0, 1.0) }
+func Orange() FColor { return NewFColor(1.0, 0.65, 0.0, 1.0) }
+func Grey() FColor   { return NewFColor(0.5, 0.5, 0.5, 1.0) }
+func Yellow() FColor { return NewFColor(1.0, 1.0, 0.0, 1.0) }
+
 // 数值类型
 type Number interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |

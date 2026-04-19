@@ -2,7 +2,9 @@ package opengl
 
 import (
 	"errors"
+
 	emath "tiny_farm/engine/utils/math"
+	gl "tiny_farm/engine/utils/opengl"
 
 	"github.com/go-gl/mathgl/mgl32"
 )
@@ -15,8 +17,8 @@ import (
  * 当窗口或逻辑尺寸变化时，提供简单接口供渲染器查询当前视口矩形。
  */
 type viewportManager struct {
-	// 渲染上下文指针
-	renderCtx *renderContext
+	// 当前线程 OpenGL 函数调用入口
+	glCtx gl.Context
 	// 当前视口矩形
 	viewport emath.Rect
 	// window pixel size (SDL_GetWindowSizeInPixels / drawable size)
@@ -28,12 +30,12 @@ type viewportManager struct {
 }
 
 // 初始化视口管理器
-func newViewportManager(rc *renderContext, windowSize, logicalSize mgl32.Vec2) (*viewportManager, error) {
-	if rc == nil {
-		return nil, errors.New("render context is nil")
+func newViewportManager(glCtx gl.Context, windowSize, logicalSize mgl32.Vec2) (*viewportManager, error) {
+	if glCtx == nil {
+		return nil, errors.New("gl context is nil")
 	}
 	vm := &viewportManager{}
-	vm.renderCtx = rc
+	vm.glCtx = glCtx
 	vm.setWindowSize(windowSize)
 	vm.setLogicalSize(logicalSize)
 	vm.update()
@@ -54,7 +56,7 @@ func (vm *viewportManager) setLogicalSize(logical_size mgl32.Vec2) {
 
 // 更新视口
 func (vm *viewportManager) update() {
-	if !vm.dirty || vm.renderCtx == nil {
+	if !vm.dirty || vm.glCtx == nil {
 		return
 	}
 
@@ -64,7 +66,7 @@ func (vm *viewportManager) update() {
 	vm.viewport = metrics.Viewport
 
 	// 设置视口，用的是像素单位
-	vm.renderCtx.glContext.Viewport(
+	vm.glCtx.Viewport(
 		int32(vm.viewport.Position.X()),
 		int32(vm.viewport.Position.Y()),
 		int32(vm.viewport.Size.X()),
