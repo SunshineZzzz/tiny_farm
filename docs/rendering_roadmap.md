@@ -10,8 +10,9 @@
 
 - `engine/render/opengl/renderContext.go` 已负责 SDL OpenGL 上下文创建、函数加载和销毁
 - `engine/render/opengl/viewportManager.go` 已负责 drawable 像素尺寸到逻辑分辨率的 letterbox viewport
-- `engine/render/opengl/glRenderer.go` 已支持默认帧缓冲清屏、窗口缓冲交换和最小纯色矩形绘制
+- `engine/render/opengl/glRenderer.go` 已支持默认帧缓冲清屏、窗口缓冲交换和纯色矩形批量提交
 - `engine/render/opengl/shaderProgram.go` 已支持从源码编译和链接 OpenGL shader program
+- `engine/render/opengl/spriteBatch.go` 已支持简化版纯色矩形 SpriteBatch
 - `config/render.json` 已支持 `debug_context`，开发阶段可启用 OpenGL 调试包装
 - `engine/core/gameApp.go` 的 `render()` 已接入 `Clear()` 和 `Present()`
 
@@ -241,8 +242,8 @@ func (gr *GLRenderer) Present() {
 
 ## 近期最小任务
 
-阶段 1 已完成，阶段 2 已完成最小纯色矩形闭环。下一步建议进入阶段 3：
+阶段 1 已完成，阶段 2 已完成最小纯色矩形闭环，阶段 3 已完成简化版纯色矩形 SpriteBatch。下一步建议进入阶段 4：
 
-- 把当前单矩形绘制扩展为简化版 `SpriteBatch`
-- 保留当前 shader program 封装
-- 先支持多个纯色矩形批量提交
+- 增加 PNG 解码和 OpenGL texture 创建
+- 支持 `DrawTexture(texture, dstRect, uvRect)`
+- 支持 src rect 到 UV 的换算

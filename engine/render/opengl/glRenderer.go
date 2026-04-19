@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 
-	"tiny_farm/engine/utils"
 	gl "tiny_farm/engine/utils/opengl"
 
 	"github.com/SunshineZzzz/purego-sdl3/sdl"
@@ -24,14 +23,10 @@ type GLRenderer struct {
 	// 默认帧缓冲清屏颜色
 	clearColor mgl32.Vec4
 
-	// 阶段 2 使用的纯色矩形着色器
+	// 纯色矩形着色器
 	rectShader *shaderProgram
-	// 纯色矩形顶点数组对象
-	rectVAO uint32
-	// 纯色矩形顶点缓冲对象
-	rectVBO uint32
-	// 纯色矩形索引缓冲对象
-	rectEBO uint32
+	// 纯色矩形批处理器
+	rectBatch *spriteBatch
 	// 纯色矩形视图投影 uniform 位置
 	rectViewProjLocation int32
 }
@@ -124,76 +119,33 @@ func (gr *GLRenderer) Clear() {
 }
 
 // 绘制一个逻辑坐标系下的纯色矩形
-func (gr *GLRenderer) DrawRect(rect mgl32.Vec4, color mgl32.Vec4) {
+func (gr *GLRenderer) DrawRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	// 检查参数是否有效
-	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil || gr.rectShader == nil {
-		return
+	if gr == nil || gr.rectBatch == nil {
+		return errors.New("gl renderer or rect batch is nil")
 	}
 
 	// X = 左上角 x，Y = 左上角 y，Z = 宽度 width，W = 高度 height
 	if rect.Z() <= 0 || rect.W() <= 0 {
-		return
+		return errors.New("rect width or height is invalid")
 	}
 
-	// 生成顶点数据
-	vertices := []float32{
-		rect.X(), rect.Y(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X() + rect.Z(), rect.Y(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X() + rect.Z(), rect.Y() + rect.W(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X(), rect.Y() + rect.W(), color.X(), color.Y(), color.Z(), color.W(),
-	}
-	// 生成索引数据
-	indices := []uint32{0, 1, 2, 2, 3, 0}
-
-	glCtx := gr.renderCtx.glContext
-	// 确保矩形画到窗口默认framebuffer上
-	glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
-	// 使用纯色矩形着色器
-	gr.rectShader.use()
-	// 设置视图投影矩阵
-	/*
-	* |  2/w    0      0     -1 |
-	* |   0   -2/h     0      1 |
-	* |   0     0     -1      0 |
-	* |   0     0      0      1 |
-	*
-	*  2*y/h - 1
-	*
-	* 对一个点，p = (x, y, z, 1)，乘完以后，
-	* clipX =  2*x/w - 1
-	* clipY = -2*y/h + 1， y越大，clipY越小，从而实现了Y轴向下增长的坐标系
-	* clipZ = -z
-	* clipW = 1
-	 */
-	viewProj := mgl32.Ortho(0, gr.logicalSize.X(), gr.logicalSize.Y(), 0, -1, 1)
-	glCtx.UniformMatrix4fv(gr.rectViewProjLocation, viewProj[:])
-
-	// 绑定之前准备好的VAO，恢复这套顶点解释规则
-	glCtx.BindVertexArray(gr.rectVAO)
-
-	// 绑定VBO，上传顶点数据
-	glCtx.BindBuffer(gl.ARRAY_BUFFER, gr.rectVBO)
-	glCtx.BufferSubData(gl.ARRAY_BUFFER, 0, utils.Float32Bytes(vertices))
-
-	// 绑定EBO，上传索引数据
-	glCtx.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, gr.rectEBO)
-	glCtx.BufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, utils.Uint32Bytes(indices))
-
-	// 绘制矩形
-	glCtx.DrawElements(gl.TRIANGLES, int32(len(indices)), gl.UNSIGNED_INT, 0)
-	// 解绑VAO
-	glCtx.BindVertexArray(0)
-	// 解绑着色器程序
-	glCtx.UseProgram(0)
+	return gr.rectBatch.queueRect(rect, color)
 }
 
 // 交换窗口前后缓冲，提交本帧画面
-func (gr *GLRenderer) Present() {
+func (gr *GLRenderer) Present() error {
 	if gr == nil || gr.renderCtx == nil {
-		return
+		return errors.New("gl renderer or render context is nil")
+	}
+
+	if err := gr.flushRectRenderer(); err != nil {
+		return err
 	}
 
 	gr.renderCtx.swapWindow()
+
+	return nil
 }
 
 // 设置垂直同步
@@ -224,7 +176,7 @@ func (gr *GLRenderer) Resize(width, height int32) {
 	gr.viewportManager.update()
 }
 
-// 初始化阶段 2 的最小矩形绘制资源
+// 初始化纯色矩形批量绘制资源
 func (gr *GLRenderer) initRectRenderer() error {
 	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
 		return errors.New("gl renderer context is nil")
@@ -269,77 +221,62 @@ func (gr *GLRenderer) initRectRenderer() error {
 	// 获取着色器程序中的视图投影矩阵位置
 	gr.rectViewProjLocation = shader.uniformLocation("uViewProj")
 
-	// 创建VAO，VBO，EBO
-	gr.rectVAO = glCtx.CreateVertexArray()
-	gr.rectVBO = glCtx.CreateBuffer()
-	gr.rectEBO = glCtx.CreateBuffer()
-	if gr.rectVAO == 0 || gr.rectVBO == 0 || gr.rectEBO == 0 {
+	batch, err := newSpriteBatch(glCtx, minSpriteBatchCapacity)
+	if err != nil {
 		gr.cleanRectRenderer()
-		return errors.New("create rect renderer buffers failed")
+		return err
 	}
+	gr.rectBatch = batch
 
-	// 每个顶点有 6 个 float32，x，y，r，g，b，a，每个 float32 是 4 字节
-	const vertexSizeBytes = 6 * 4
-
-	// 绑定VAO，接下来设置的顶点格式，都记录到这个 VAO 里
-	glCtx.BindVertexArray(gr.rectVAO)
-	// 绑定VBO，并且分配显存空间
-	glCtx.BindBuffer(gl.ARRAY_BUFFER, gr.rectVBO)
-	// 矩形有4个顶点
-	glCtx.BufferInit(gl.ARRAY_BUFFER, 4*vertexSizeBytes, gl.DYNAMIC_DRAW)
-
-	// 绑定EBO，并且分配显存空间
-	glCtx.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, gr.rectEBO)
-	// 矩形有6个索引(uint32)
-	glCtx.BufferInit(gl.ELEMENT_ARRAY_BUFFER, 6*4, gl.DYNAMIC_DRAW)
-
-	// 设置位置描述信息
-	// 0 - location = 0
-	// 2 - 这个属性有 2 个 float：x, y
-	// gl.FLOAT - 类型是 float
-	// false - 不归一化
-	// vertexSizeBytes - 每个顶点间隔 24 字节
-	// 0 - 从每个顶点的第 0 字节开始读
-	glCtx.VertexAttribPointer(0, 2, gl.FLOAT, false, vertexSizeBytes, 0)
-	glCtx.EnableVertexAttribArray(0)
-
-	// 设置颜色描述信息
-	// 1 - location = 1
-	// 4 - 这个属性有 4 个 float：r, g, b, a
-	// gl.FLOAT - 类型是 float
-	// false - 不归一化
-	// vertexSizeBytes - 每个顶点间隔 24 字节
-	// 2*4 - 从每个顶点的第 8 字节开始读
-	glCtx.VertexAttribPointer(1, 4, gl.FLOAT, false, vertexSizeBytes, 2*4)
-	glCtx.EnableVertexAttribArray(1)
-
-	// 解除VAO绑定，初始化完成
-	glCtx.BindVertexArray(0)
 	return nil
 }
 
-// 释放阶段 2 的矩形绘制资源
+// 提交当前帧已入队的矩形
+func (gr *GLRenderer) flushRectRenderer() error {
+	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil || gr.rectShader == nil || gr.rectBatch == nil {
+		return nil
+	}
+
+	glCtx := gr.renderCtx.glContext
+	glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	gr.rectShader.use()
+	/*
+	* |  2/w    0      0     -1 |
+	* |   0   -2/h     0      1 |
+	* |   0     0     -1      0 |
+	* |   0     0      0      1 |
+	*
+	* 对一个点，p = (x, y, z, 1)，乘完以后，
+	* clipX =  2*x/w - 1
+	* clipY = -2*y/h + 1，y越大，clipY越小，从而实现 Y 轴向下增长
+	* clipZ = -z
+	* clipW = 1
+	 */
+	viewProj := mgl32.Ortho(0, gr.logicalSize.X(), gr.logicalSize.Y(), 0, -1, 1)
+	glCtx.UniformMatrix4fv(gr.rectViewProjLocation, viewProj[:])
+	if err := gr.rectBatch.flush(); err != nil {
+		glCtx.UseProgram(0)
+		return err
+	}
+	glCtx.UseProgram(0)
+	return nil
+}
+
+// 释放纯色矩形批量绘制资源
 func (gr *GLRenderer) cleanRectRenderer() {
 	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
 		return
 	}
 
-	ctx := gr.renderCtx.glContext
-	if gr.rectEBO != 0 {
-		ctx.DeleteBuffer(gr.rectEBO)
-		gr.rectEBO = 0
+	if gr.rectBatch != nil {
+		gr.rectBatch.clean()
+		gr.rectBatch = nil
 	}
-	if gr.rectVBO != 0 {
-		ctx.DeleteBuffer(gr.rectVBO)
-		gr.rectVBO = 0
-	}
-	if gr.rectVAO != 0 {
-		ctx.DeleteVertexArray(gr.rectVAO)
-		gr.rectVAO = 0
-	}
+
 	if gr.rectShader != nil {
 		gr.rectShader.clean()
 		gr.rectShader = nil
 	}
+
 	gr.rectViewProjLocation = -1
 }
