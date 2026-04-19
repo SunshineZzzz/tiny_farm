@@ -63,7 +63,7 @@ func (vm *viewportManager) update() {
 	metrics := emath.ComputeLetterboxMetrics(vm.windowSize, vm.logicalSize)
 	vm.viewport = metrics.Viewport
 
-	// 设置视口
+	// 设置视口，用的是像素单位
 	vm.renderCtx.glContext.Viewport(
 		int32(vm.viewport.Position.X()),
 		int32(vm.viewport.Position.Y()),

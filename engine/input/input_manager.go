@@ -463,6 +463,7 @@ func (m *InputManager) recalculateLogicalMousePosition() {
 		return
 	}
 
+	// 输入(鼠标)最终要映射到Logical
 	local := m.mousePosition.Sub(metrics.Viewport.Position)
 	logical := local.Mul(1 / metrics.Scale)
 
