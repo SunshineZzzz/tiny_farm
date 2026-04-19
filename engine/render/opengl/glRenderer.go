@@ -3,6 +3,8 @@ package opengl
 import (
 	"log/slog"
 
+	gl "tiny_farm/engine/utils/opengl"
+
 	"github.com/SunshineZzzz/purego-sdl3/sdl"
 	"github.com/go-gl/mathgl/mgl32"
 )
@@ -17,6 +19,8 @@ type GLRenderer struct {
 	viewportManager *viewportManager
 	// 游戏逻辑窗口大小
 	logicalSize mgl32.Vec2
+	// 默认帧缓冲清屏颜色
+	clearColor mgl32.Vec4
 }
 
 // 创建 GLRenderer 实例
@@ -31,6 +35,7 @@ func NewGLRenderer(window *sdl.Window, logicalSize mgl32.Vec2, paramsJsonPath st
 // 初始化渲染器
 func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJsonPath string) error {
 	gr.logicalSize = logicalSize
+	gr.clearColor = mgl32.Vec4{0.2, 0.3, 0.3, 1.0}
 	rc, err := newRenderContext(window, paramsJsonPath)
 	if err != nil {
 		return err
@@ -69,6 +74,42 @@ func (gr *GLRenderer) LogicalSize() mgl32.Vec2 {
 	}
 
 	return gr.logicalSize
+}
+
+// 设置默认帧缓冲清屏颜色
+func (gr *GLRenderer) SetClearColor(color mgl32.Vec4) {
+	if gr == nil {
+		return
+	}
+
+	gr.clearColor = color
+}
+
+// 清空当前帧的默认帧缓冲
+//
+// 当前阶段还没有离屏渲染目标，只负责把默认帧缓冲清理到已知颜色
+func (gr *GLRenderer) Clear() {
+	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
+		return
+	}
+
+	if gr.viewportManager != nil && gr.viewportManager.dirty {
+		gr.viewportManager.update()
+	}
+
+	ctx := gr.renderCtx.glContext
+	ctx.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	ctx.ClearColor(gr.clearColor.X(), gr.clearColor.Y(), gr.clearColor.Z(), gr.clearColor.W())
+	ctx.Clear(gl.COLOR_BUFFER_BIT)
+}
+
+// 交换窗口前后缓冲，提交本帧画面
+func (gr *GLRenderer) Present() {
+	if gr == nil || gr.renderCtx == nil {
+		return
+	}
+
+	gr.renderCtx.swapWindow()
 }
 
 // 设置垂直同步

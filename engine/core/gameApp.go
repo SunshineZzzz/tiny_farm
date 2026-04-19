@@ -122,6 +122,12 @@ func (a *GameApp) update(deltaTime float64) {
 
 // 渲染
 func (a *GameApp) render() {
+	if a.glRenderer == nil {
+		return
+	}
+
+	a.glRenderer.Clear()
+	a.glRenderer.Present()
 }
 
 // 低频输出当前主循环帧率统计
