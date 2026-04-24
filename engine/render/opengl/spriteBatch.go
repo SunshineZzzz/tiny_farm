@@ -2,6 +2,7 @@ package opengl
 
 import (
 	"errors"
+	"fmt"
 	"unsafe"
 
 	"tiny_farm/engine/utils"
@@ -11,16 +12,17 @@ import (
 )
 
 const (
-	// 每个float32占用字节数
+	// 每个 float32 占用字节数
 	float32Size = int(unsafe.Sizeof(float32(0)))
-	// 每个uint32占用字节数
+	// 每个 uint32 占用字节数
 	uint32Size = int(unsafe.Sizeof(uint32(0)))
 	// 最小精灵批处理容量
 	minSpriteBatchCapacity = 64
 	// 每个精灵顶点 float 数量
 	// 2 个 float：x, y
+	// 2 个 float：u, v
 	// 4 个 float：r, g, b, a
-	spriteVertexFloatCount = 6
+	spriteVertexFloatCount = 8
 	// 每个精灵顶点字节数
 	spriteVertexByteSize = spriteVertexFloatCount * float32Size
 	// 每个精灵顶点数量
@@ -29,9 +31,21 @@ const (
 	spriteIndexCount = 6
 )
 
+// 精灵绘制命令
+type spriteCommand struct {
+	// 底层 OpenGL texture 句柄
+	texture uint32
+	// 这条命令在索引缓冲里的起始位置
+	indexFrom uint32
+	// 这条命令要画多少个 index
+	indexCount uint32
+	// 是否使用纹理
+	useTexture bool
+}
+
 // CPU 端精灵批处理
 //
-// 当前阶段只支持纯色矩形，先复用参考实现的“入队后统一 flush”结构
+// 当前阶段支持纯色矩形和基础贴图，按提交顺序合并连续使用同一纹理的命令
 type spriteBatch struct {
 	// 当前线程 OpenGL 函数调用入口
 	glCtx gl.Context
@@ -43,10 +57,14 @@ type spriteBatch struct {
 	ebo uint32
 	// 当前 GPU 缓冲可容纳的精灵数量
 	capacity int
-	// CPU 端顶点缓存，每个顶点为 x、y、r、g、b、a
+	// 纯色矩形使用的 1x1 白色纹理
+	defaultTexture uint32
+	// CPU 端顶点缓存，每个顶点为 x、y、u、v、r、g、b、a
 	vertices []float32
 	// CPU 端索引缓存
 	indices []uint32
+	// CPU 端精灵绘制命令缓存
+	commands []spriteCommand
 }
 
 // 创建纯色矩形批处理器
@@ -95,16 +113,26 @@ func (b *spriteBatch) init(initialCapacity int) error {
 	b.glCtx.VertexAttribPointer(0, 2, gl.FLOAT, false, int32(spriteVertexByteSize), 0)
 	// 启用 location = 0，让 shader 可以收到这个顶点位置数据
 	b.glCtx.EnableVertexAttribArray(0)
-	// 设置颜色描述信息
+	// 设置 UV 描述信息
 	// 1 - location = 1
+	// 2 - 这个属性有 2 个 float：u, v
+	// gl.FLOAT - 类型是 float
+	// false - 不归一化
+	// spriteVertexByteSize - 每个顶点间隔 32 字节
+	// 2*4 - 从每个顶点的第 8 字节开始读
+	b.glCtx.VertexAttribPointer(1, 2, gl.FLOAT, false, int32(spriteVertexByteSize), 2*float32Size)
+	// 启用 location = 1，让 shader 可以收到这个顶点 UV 数据
+	b.glCtx.EnableVertexAttribArray(1)
+	// 设置颜色描述信息
+	// 2 - location = 2
 	// 4 - 这个属性有 4 个 float：r, g, b, a
 	// gl.FLOAT - 类型是 float
 	// false - 不归一化
-	// spriteVertexByteSize - 每个顶点间隔 24 字节
-	// 2*4 - 从每个顶点的第 8 字节开始读
-	b.glCtx.VertexAttribPointer(1, 4, gl.FLOAT, false, int32(spriteVertexByteSize), 2*4)
-	// 启用 location = 1，让 shader 可以收到这个顶点颜色数据
-	b.glCtx.EnableVertexAttribArray(1)
+	// spriteVertexByteSize - 每个顶点间隔 32 字节
+	// 4*4 - 从每个顶点的第 16 字节开始读
+	b.glCtx.VertexAttribPointer(2, 4, gl.FLOAT, false, int32(spriteVertexByteSize), 4*float32Size)
+	// 启用 location = 2，让 shader 可以收到这个顶点颜色数据
+	b.glCtx.EnableVertexAttribArray(2)
 	// 解绑VAO
 	b.glCtx.BindVertexArray(0)
 
@@ -116,6 +144,11 @@ func (b *spriteBatch) init(initialCapacity int) error {
 	// 清空CPU端缓存
 	b.reset()
 
+	// 创建默认纹理
+	if err := b.createDefaultTexture(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -123,6 +156,11 @@ func (b *spriteBatch) init(initialCapacity int) error {
 func (b *spriteBatch) clean() {
 	if b == nil || b.glCtx == nil {
 		return
+	}
+
+	if b.defaultTexture != 0 {
+		b.glCtx.DeleteTexture(b.defaultTexture)
+		b.defaultTexture = 0
 	}
 
 	if b.ebo != 0 {
@@ -143,10 +181,33 @@ func (b *spriteBatch) clean() {
 	b.capacity = 0
 	b.vertices = nil
 	b.indices = nil
+	b.commands = nil
 }
 
 // 将纯色矩形加入本帧批处理队列
 func (b *spriteBatch) queueRect(rect mgl32.Vec4, color mgl32.Vec4) error {
+	if b == nil || b.glCtx == nil {
+		return errors.New("sprite batch is nil")
+	}
+
+	if rect.Z() <= 0 || rect.W() <= 0 {
+		return nil
+	}
+
+	return b.queueSprite(0, false, rect, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}, color)
+}
+
+// 将贴图矩形加入本帧批处理队列
+func (b *spriteBatch) queueTexture(texture *Texture, rect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+	if texture == nil || texture.id == 0 {
+		return errors.New("texture is nil")
+	}
+
+	return b.queueSprite(texture.id, true, rect, uvRect, color)
+}
+
+// 将一个精灵加入本帧队列，纹理命令只合并相邻且纹理一致的段
+func (b *spriteBatch) queueSprite(texture uint32, useTexture bool, rect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if b == nil || b.glCtx == nil {
 		return errors.New("sprite batch is nil")
 	}
@@ -161,22 +222,49 @@ func (b *spriteBatch) queueRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	}
 
 	baseIndex := uint32(len(b.vertices) / spriteVertexFloatCount)
+	// rect.X() // 左上角 x
+	// rect.Y() // 左上角 y
+	// rect.Z() // 宽度 width
+	// rect.W() // 高度 height
+	//
+	// uvRect.X() // 左 u
+	// uvRect.Y() // 上 v
+	// uvRect.Z() // 右 u
+	// uvRect.W() // 下 v
+	//
+	// 左上，右上，右下，左下
 	b.vertices = append(b.vertices,
-		rect.X(), rect.Y(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X()+rect.Z(), rect.Y(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X()+rect.Z(), rect.Y()+rect.W(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X(), rect.Y()+rect.W(), color.X(), color.Y(), color.Z(), color.W(),
+		rect.X(), rect.Y(), uvRect.X(), uvRect.Y(), color.X(), color.Y(), color.Z(), color.W(),
+		rect.X()+rect.Z(), rect.Y(), uvRect.Z(), uvRect.Y(), color.X(), color.Y(), color.Z(), color.W(),
+		rect.X()+rect.Z(), rect.Y()+rect.W(), uvRect.Z(), uvRect.W(), color.X(), color.Y(), color.Z(), color.W(),
+		rect.X(), rect.Y()+rect.W(), uvRect.X(), uvRect.W(), color.X(), color.Y(), color.Z(), color.W(),
 	)
+	indexFrom := uint32(len(b.indices))
 	b.indices = append(b.indices,
 		baseIndex+0, baseIndex+1, baseIndex+2,
 		baseIndex+2, baseIndex+3, baseIndex+0,
 	)
+	if len(b.commands) > 0 {
+		last := &b.commands[len(b.commands)-1]
+		if last.texture == texture && last.useTexture == useTexture {
+			last.indexCount += spriteIndexCount
+			return nil
+		}
+	}
+	b.commands = append(b.commands, spriteCommand{
+		texture:    texture,
+		indexFrom:  indexFrom,
+		indexCount: spriteIndexCount,
+		useTexture: useTexture,
+	})
 
 	return nil
 }
 
 // 提交本帧所有已入队矩形
-func (b *spriteBatch) flush() error {
+// textureLocation - 纹理 sampler 位置
+// useTextureLocation - 是否使用纹理 sampler 位置
+func (b *spriteBatch) flush(textureLocation int32, useTextureLocation int32) error {
 	if b == nil || b.glCtx == nil {
 		return errors.New("sprite batch is nil")
 	}
@@ -187,15 +275,40 @@ func (b *spriteBatch) flush() error {
 	}
 
 	// 绑定之前准备好的VAO，恢复这套顶点解释规则
-	b.glCtx.BindVertexArray(b.vao)
 	// 绑定VBO，上传顶点数据
+	b.glCtx.BindVertexArray(b.vao)
 	b.glCtx.BindBuffer(gl.ARRAY_BUFFER, b.vbo)
 	b.glCtx.BufferSubData(gl.ARRAY_BUFFER, 0, utils.Float32Bytes(b.vertices))
 	// 绑定EBO，上传索引数据
 	b.glCtx.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, b.ebo)
 	b.glCtx.BufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, utils.Uint32Bytes(b.indices))
-	// 回执
-	b.glCtx.DrawElements(gl.TRIANGLES, int32(len(b.indices)), gl.UNSIGNED_INT, 0)
+	// 设置 uTexture 使用纹理单元 0
+	if textureLocation >= 0 {
+		b.glCtx.Uniform1i(textureLocation, 0)
+	}
+	// 激活纹理单元 0
+	b.glCtx.ActiveTexture(gl.TEXTURE0)
+	// 按 command 分批绘制精灵
+	for _, cmd := range b.commands {
+		texture := cmd.texture
+		if texture == 0 {
+			texture = b.defaultTexture
+		}
+		// 绑定到 TEXTURE0 上
+		b.glCtx.BindTexture(gl.TEXTURE_2D, texture)
+		if useTextureLocation >= 0 {
+			if cmd.useTexture {
+				b.glCtx.Uniform1i(useTextureLocation, 1)
+			} else {
+				b.glCtx.Uniform1i(useTextureLocation, 0)
+			}
+		}
+		// 用三角形模式绘制，画 cmd.indexCount 个索引，索引类型是 uint32，从 EBO 的 cmd.indexFrom 位置开始读
+		// 最后一个参数要注意：int(cmd.indexFrom) * uint32Size，这里传的是 字节偏移量，不是 index 数量
+		b.glCtx.DrawElements(gl.TRIANGLES, int32(cmd.indexCount), gl.UNSIGNED_INT, int(cmd.indexFrom)*uint32Size)
+	}
+	// 解绑 TEXTURE0
+	b.glCtx.BindTexture(gl.TEXTURE_2D, 0)
 	// 解绑VAO
 	b.glCtx.BindVertexArray(0)
 
@@ -209,6 +322,7 @@ func (b *spriteBatch) flush() error {
 func (b *spriteBatch) reset() {
 	b.vertices = b.vertices[:0]
 	b.indices = b.indices[:0]
+	b.commands = b.commands[:0]
 }
 
 // 确保 GPU 缓冲 和 CPU 缓冲至少能容纳 requiredSprites 个精灵
@@ -251,6 +365,36 @@ func (b *spriteBatch) ensureCapacity(requiredSprites int) error {
 		copy(newIndices, b.indices)
 		b.indices = newIndices
 	}
+	if cap(b.commands) < nextCapacity {
+		newCommands := make([]spriteCommand, len(b.commands), nextCapacity)
+		copy(newCommands, b.commands)
+		b.commands = newCommands
+	}
 
+	return nil
+}
+
+// 创建纯色矩形使用的默认白纹理
+func (b *spriteBatch) createDefaultTexture() error {
+	if b.defaultTexture != 0 {
+		return nil
+	}
+
+	texture := b.glCtx.CreateTexture()
+	if texture == 0 {
+		return fmt.Errorf("create default texture failed,%v", b.glCtx.GetError())
+	}
+
+	pixels := []byte{255, 255, 255, 255}
+	b.glCtx.BindTexture(gl.TEXTURE_2D, texture)
+	b.glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	b.glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	b.glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	b.glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	b.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+	b.glCtx.TexImage2D(gl.TEXTURE_2D, 0, int32(gl.RGBA), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+	b.glCtx.BindTexture(gl.TEXTURE_2D, 0)
+
+	b.defaultTexture = texture
 	return nil
 }

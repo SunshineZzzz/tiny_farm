@@ -29,6 +29,10 @@ type GLRenderer struct {
 	rectBatch *spriteBatch
 	// 纯色矩形视图投影 uniform 位置
 	rectViewProjLocation int32
+	// 批处理纹理采样器 uniform 位置
+	rectTextureLocation int32
+	// 批处理是否采样纹理 uniform 位置
+	rectUseTextureLocation int32
 }
 
 // 创建 GLRenderer 实例
@@ -133,6 +137,36 @@ func (gr *GLRenderer) DrawRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	return gr.rectBatch.queueRect(rect, color)
 }
 
+// 绘制一个逻辑坐标系下的贴图矩形
+func (gr *GLRenderer) DrawTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+	if gr == nil || gr.rectBatch == nil {
+		return errors.New("gl renderer or rect batch is nil")
+	}
+	if dstRect.Z() <= 0 || dstRect.W() <= 0 {
+		return errors.New("dst rect width or height is invalid")
+	}
+
+	return gr.rectBatch.queueTexture(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+}
+
+// 绘制一个逻辑坐标系下的贴图源矩形
+func (gr *GLRenderer) DrawTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
+	uvRect, err := textureSourceRectUV(texture, srcRect)
+	if err != nil {
+		return err
+	}
+	return gr.DrawTexture(texture, dstRect, uvRect)
+}
+
+// 从图像文件创建可绘制纹理
+func (gr *GLRenderer) LoadTexture(path string) (*Texture, error) {
+	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
+		return nil, errors.New("gl renderer context is nil")
+	}
+
+	return newTexture(gr.renderCtx.glContext, path)
+}
+
 // 交换窗口前后缓冲，提交本帧画面
 func (gr *GLRenderer) Present() error {
 	if gr == nil || gr.renderCtx == nil {
@@ -186,13 +220,16 @@ func (gr *GLRenderer) initRectRenderer() error {
 	const rectVertexShaderSource = `
 	#version 330 core
 	layout(location = 0) in vec2 aPos;
-	layout(location = 1) in vec4 aColor;
+	layout(location = 1) in vec2 aUV;
+	layout(location = 2) in vec4 aColor;
 
 	uniform mat4 uViewProj;
 
+	out vec2 vUV;
 	out vec4 vColor;
 
 	void main() {
+		vUV = aUV;
 		vColor = aColor;
 		gl_Position = uViewProj * vec4(aPos, 0.0, 1.0);
 	}
@@ -201,12 +238,20 @@ func (gr *GLRenderer) initRectRenderer() error {
 	// 矩形片段着色器
 	const rectFragmentShaderSource = `
 	#version 330 core
+	in vec2 vUV;
 	in vec4 vColor;
+
+	uniform sampler2D uTexture;
+	uniform bool uUseTexture;
 
 	out vec4 FragColor;
 
 	void main() {
-		FragColor = vColor;
+		if (uUseTexture) {
+			FragColor = texture(uTexture, vUV) * vColor;
+		} else {
+			FragColor = vColor;
+		}
 	}
 	`
 
@@ -220,7 +265,20 @@ func (gr *GLRenderer) initRectRenderer() error {
 
 	// 获取着色器程序中的视图投影矩阵位置
 	gr.rectViewProjLocation = shader.uniformLocation("uViewProj")
+	// 获取着色器程序中的纹理位置
+	gr.rectTextureLocation = shader.uniformLocation("uTexture")
+	// 获取着色器程序中的是否使用纹理位置
+	gr.rectUseTextureLocation = shader.uniformLocation("uUseTexture")
 
+	// 启用混合功能
+	glCtx.Enable(gl.BLEND)
+	// Source (SRC): 准备画上去的新像素（比如你的半透明图片）。
+	// Destination (DST): 已经在屏幕上的像素（底色）。
+	// 结果RGB = 源RGB × 源Alpha + 目标RGB × (1 - 源Alpha)
+	// 结果Alpha = 源Alpha × 1 + 目标Alpha × (1 - 源Alpha)
+	glCtx.BlendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+
+	// 创建纯色矩形批处理器
 	batch, err := newSpriteBatch(glCtx, minSpriteBatchCapacity)
 	if err != nil {
 		gr.cleanRectRenderer()
@@ -254,7 +312,7 @@ func (gr *GLRenderer) flushRectRenderer() error {
 	 */
 	viewProj := mgl32.Ortho(0, gr.logicalSize.X(), gr.logicalSize.Y(), 0, -1, 1)
 	glCtx.UniformMatrix4fv(gr.rectViewProjLocation, viewProj[:])
-	if err := gr.rectBatch.flush(); err != nil {
+	if err := gr.rectBatch.flush(gr.rectTextureLocation, gr.rectUseTextureLocation); err != nil {
 		glCtx.UseProgram(0)
 		return err
 	}
@@ -279,4 +337,6 @@ func (gr *GLRenderer) cleanRectRenderer() {
 	}
 
 	gr.rectViewProjLocation = -1
+	gr.rectTextureLocation = -1
+	gr.rectUseTextureLocation = -1
 }
