@@ -8,7 +8,7 @@ import (
 	"tiny_farm/engine/abstract"
 	ectx "tiny_farm/engine/context"
 	"tiny_farm/engine/input"
-	"tiny_farm/engine/render/opengl"
+	"tiny_farm/engine/render"
 	"tiny_farm/engine/utils/dispatch"
 	"tiny_farm/engine/utils/event"
 
@@ -32,9 +32,9 @@ type GameApp struct {
 	// 标记 SDL 子系统是否已经初始化
 	sdlInitialized bool
 	// 管理当前 SDL 窗口和 OpenGL 上下文
-	glRenderer *opengl.GLRenderer
+	renderer *render.Renderer
 	// 阶段 4 用于验证贴图绘制的临时纹理
-	demoTexture *opengl.Texture
+	demoTexture *render.Texture
 	// 游戏配置
 	config *Config
 	// 负责本轮主循环的控帧和 dt 计算
@@ -124,25 +124,25 @@ func (a *GameApp) update(deltaTime float64) {
 
 // 渲染
 func (a *GameApp) render() {
-	if a.glRenderer == nil {
+	if a.renderer == nil {
 		return
 	}
 
-	a.glRenderer.Clear()
-	a.glRenderer.DrawRect(mgl32.Vec4{32.0, 32.0, 96.0, 64.0}, mgl32.Vec4{0.9, 0.72, 0.32, 1.0})
-	a.glRenderer.DrawRect(mgl32.Vec4{144.0, 48.0, 48.0, 96}, mgl32.Vec4{0.38, 0.72, 0.92, 1.0})
-	a.glRenderer.DrawRect(mgl32.Vec4{216.0, 80.0, 72.0, 40.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
+	a.renderer.Clear()
+	a.renderer.DrawRect(mgl32.Vec4{32.0, 32.0, 96.0, 64.0}, mgl32.Vec4{0.9, 0.72, 0.32, 1.0})
+	a.renderer.DrawRect(mgl32.Vec4{144.0, 48.0, 48.0, 96}, mgl32.Vec4{0.38, 0.72, 0.92, 1.0})
+	a.renderer.DrawRect(mgl32.Vec4{216.0, 80.0, 72.0, 40.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
 	if a.demoTexture != nil {
-		a.glRenderer.DrawRect(mgl32.Vec4{32.0, 4.0, 96.0, 32.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
-		if err := a.glRenderer.DrawTexture(a.demoTexture, mgl32.Vec4{32.0, 4.0, 96.0, 32.0}, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}); err != nil {
+		a.renderer.DrawRect(mgl32.Vec4{32.0, 4.0, 96.0, 32.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
+		if err := a.renderer.DrawTexture(a.demoTexture, mgl32.Vec4{32.0, 4.0, 96.0, 32.0}, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}); err != nil {
 			slog.Error("draw demo texture failed", slog.Any("err", err))
 		}
-		a.glRenderer.DrawRect(mgl32.Vec4{32.0, 92.0, 48.0, 32.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
-		if err := a.glRenderer.DrawTextureSourceRect(a.demoTexture, mgl32.Vec4{32.0, 92.0, 48.0, 32.0}, mgl32.Vec4{0.0, 0.0, 24.0, 16.0}); err != nil {
+		a.renderer.DrawRect(mgl32.Vec4{32.0, 92.0, 48.0, 32.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
+		if err := a.renderer.DrawTextureSourceRect(a.demoTexture, mgl32.Vec4{32.0, 92.0, 48.0, 32.0}, mgl32.Vec4{0.0, 0.0, 24.0, 16.0}); err != nil {
 			slog.Error("draw demo texture source rect failed", slog.Any("err", err))
 		}
 	}
-	a.glRenderer.Present()
+	a.renderer.Present()
 }
 
 // 低频输出当前主循环帧率统计
@@ -231,8 +231,8 @@ func (a *GameApp) onWindowResizedEvent(event event.WindowResizedEvent) {
 		// 将窗口坐标转换为像素坐标（高DPI）
 		sdl.GetWindowSizeInPixels(a.window, &w, &h)
 	}
-	if a.glRenderer != nil {
-		a.glRenderer.Resize(w, h)
+	if a.renderer != nil {
+		a.renderer.Resize(w, h)
 	}
 }
 
@@ -307,13 +307,13 @@ func (a *GameApp) initGLRenderer() error {
 		float32(a.config.Window.Width) * a.config.Window.LogicalScale,
 		float32(a.config.Window.Height) * a.config.Window.LogicalScale,
 	}
-	glRenderer, err := opengl.NewGLRenderer(a.window, logicalSize, "config/render.json")
+	renderer, err := render.NewRenderer(a.window, logicalSize, "config/render.json")
 	if err != nil {
 		return err
 	}
-	a.glRenderer = glRenderer
-	a.glRenderer.SetVSyncEnabled(a.config.Graphics.Vsync)
-	demoTexture, err := a.glRenderer.LoadTexture("assets/tests/Button Normal.png")
+	a.renderer = renderer
+	a.renderer.SetVSyncEnabled(a.config.Graphics.Vsync)
+	demoTexture, err := a.renderer.LoadTexture("assets/tests/Button Normal.png")
 	if err != nil {
 		return err
 	}
@@ -344,9 +344,9 @@ func (a *GameApp) close() {
 		a.demoTexture = nil
 	}
 
-	if a.glRenderer != nil {
-		a.glRenderer.Close()
-		a.glRenderer = nil
+	if a.renderer != nil {
+		a.renderer.Close()
+		a.renderer = nil
 	}
 
 	if a.window != nil {

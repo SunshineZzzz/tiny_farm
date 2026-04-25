@@ -77,7 +77,7 @@ func newTexture(glCtx gl.Context, path string) (*Texture, error) {
 		return nil, err
 	}
 
-	rgba := utils.ImageToNRGBA(img)
+	rgba := utils.ImageToNRGBA(img, true)
 	bounds := rgba.Bounds()
 	width := int32(bounds.Dx())
 	height := int32(bounds.Dy())
