@@ -18,6 +18,8 @@ type GLRenderer struct {
 	renderCtx *renderContext
 	// 视口管理器
 	viewportManager *viewportManager
+	// 场景离屏渲染目标
+	scenePass *scenePass
 	// 游戏逻辑窗口大小
 	logicalSize mgl32.Vec2
 	// 默认帧缓冲清屏颜色
@@ -59,6 +61,12 @@ func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJso
 		return err
 	}
 	gr.viewportManager = vm
+
+	scenePass, err := newScenePass(rc.glContext, logicalSize)
+	if err != nil {
+		return err
+	}
+	gr.scenePass = scenePass
 
 	if err := gr.initRectRenderer(); err != nil {
 		return err
@@ -103,23 +111,20 @@ func (gr *GLRenderer) SetClearColor(color mgl32.Vec4) {
 
 // 清空当前帧的默认帧缓冲
 //
-// 当前阶段还没有离屏渲染目标，只负责把默认帧缓冲清理到已知颜色
+// 当前阶段先清默认 framebuffer 的黑边区域，再切到场景 FBO 清理场景内容
 func (gr *GLRenderer) Clear() {
 	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
 		return
 	}
 
-	if gr.viewportManager != nil && gr.viewportManager.dirty {
-		gr.viewportManager.update()
-	}
-
 	glCtx := gr.renderCtx.glContext
-	// 绑定默认 framebuffer
 	glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
-	// 设置清屏颜色
-	glCtx.ClearColor(gr.clearColor.X(), gr.clearColor.Y(), gr.clearColor.Z(), gr.clearColor.W())
-	// 清空窗口颜色缓冲
+	glCtx.ClearColor(0.0, 0.0, 0.0, 1.0)
 	glCtx.Clear(gl.COLOR_BUFFER_BIT)
+
+	if gr.scenePass != nil {
+		gr.scenePass.clear(gr.clearColor)
+	}
 }
 
 // 绘制一个逻辑坐标系下的纯色矩形
@@ -173,7 +178,10 @@ func (gr *GLRenderer) Present() error {
 		return errors.New("gl renderer or render context is nil")
 	}
 
-	if err := gr.flushRectRenderer(); err != nil {
+	if err := gr.flushScenePass(); err != nil {
+		return err
+	}
+	if err := gr.flushSceneTexture(); err != nil {
 		return err
 	}
 
@@ -197,6 +205,10 @@ func (gr *GLRenderer) SetVSyncEnabled(enabled bool) {
 // 关闭渲染器并释放上下文
 func (gr *GLRenderer) Close() {
 	gr.cleanRectRenderer()
+	if gr.scenePass != nil {
+		gr.scenePass.clean()
+		gr.scenePass = nil
+	}
 	if gr.renderCtx != nil {
 		gr.renderCtx.clean()
 		gr.renderCtx = nil
@@ -296,7 +308,6 @@ func (gr *GLRenderer) flushRectRenderer() error {
 	}
 
 	glCtx := gr.renderCtx.glContext
-	glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
 	gr.rectShader.use()
 	/*
 	* |  2/w    0      0     -1 |
@@ -311,6 +322,65 @@ func (gr *GLRenderer) flushRectRenderer() error {
 	* clipW = 1
 	 */
 	viewProj := mgl32.Ortho(0, gr.logicalSize.X(), gr.logicalSize.Y(), 0, -1, 1)
+	glCtx.UniformMatrix4fv(gr.rectViewProjLocation, viewProj[:])
+	if err := gr.rectBatch.flush(gr.rectTextureLocation, gr.rectUseTextureLocation); err != nil {
+		glCtx.UseProgram(0)
+		return err
+	}
+	glCtx.UseProgram(0)
+	return nil
+}
+
+// 提交场景批处理到 logical size FBO
+func (gr *GLRenderer) flushScenePass() error {
+	if gr == nil || gr.scenePass == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
+		return nil
+	}
+
+	glCtx := gr.renderCtx.glContext
+	// 把“当前画布”切到场景 FBO
+	glCtx.BindFramebuffer(gl.FRAMEBUFFER, gr.scenePass.framebuffer)
+	// 设置视口为场景 FBO 的尺寸
+	glCtx.Viewport(0, 0, int32(gr.logicalSize.X()), int32(gr.logicalSize.Y()))
+	// 把 batch 里的内容画进这张逻辑分辨率的离屏纹理里
+	return gr.flushRectRenderer()
+}
+
+// 将场景 FBO 输出到默认 framebuffer 的 letterbox viewport
+func (gr *GLRenderer) flushSceneTexture() error {
+	if gr == nil || gr.scenePass == nil || gr.scenePass.texture() == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
+		return nil
+	}
+
+	// 确保 letterbox viewport 是最新的
+	if gr.viewportManager != nil && gr.viewportManager.dirty {
+		gr.viewportManager.update()
+	}
+
+	// 这个不是用 logicalSize，而是用窗口里的 letterbox 区域的尺寸
+	viewport := gr.viewportManager.viewport
+	glCtx := gr.renderCtx.glContext
+	glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	glCtx.Viewport(
+		int32(viewport.Position.X()),
+		int32(viewport.Position.Y()),
+		int32(viewport.Size.X()),
+		int32(viewport.Size.Y()),
+	)
+
+	// 把 scenePass 那张完整场景图，拉伸/缩放后，画到窗口里的 viewport 区域
+	// 注意这里 DrawTexture() 不是立刻就发 draw call，它还是把一个矩形塞进 rectBatch
+	if err := gr.DrawTexture(
+		gr.scenePass.texture(),
+		mgl32.Vec4{0.0, 0.0, viewport.Size.X(), viewport.Size.Y()},
+		mgl32.Vec4{0.0, 0.0, 1.0, 1.0},
+	); err != nil {
+		return err
+	}
+
+	// draw call
+	gr.rectShader.use()
+	viewProj := mgl32.Ortho(0, viewport.Size.X(), viewport.Size.Y(), 0, -1, 1)
 	glCtx.UniformMatrix4fv(gr.rectViewProjLocation, viewProj[:])
 	if err := gr.rectBatch.flush(gr.rectTextureLocation, gr.rectUseTextureLocation); err != nil {
 		glCtx.UseProgram(0)

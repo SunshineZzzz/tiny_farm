@@ -103,6 +103,7 @@ func newTexture(glCtx gl.Context, path string) (*Texture, error) {
 	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 
 	// 纹理数据按 1 字节对齐上传，避免非 4 字节宽度图片读错行
+	// 设置 1 是为了让这个函数“通用”。无论你传进来的是什么样奇葩尺寸、什么样通道数的图片，它都能保证绝对不花屏
 	glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
 	glCtx.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, gl.RGBA, gl.UNSIGNED_BYTE, rgba.Pix)
 

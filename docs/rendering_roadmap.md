@@ -14,6 +14,7 @@
 - `engine/render/opengl/shaderProgram.go` 已支持从源码编译和链接 OpenGL shader program
 - `engine/render/opengl/spriteBatch.go` 已支持简化版纯色矩形和贴图 SpriteBatch
 - `engine/render/opengl/texture.go` 已支持 PNG 解码、OpenGL texture 创建和 src rect 到 UV 换算
+- `engine/render/opengl/scenePass.go` 已支持 logical size FBO、color texture 和场景离屏清屏
 - `config/render.json` 已支持 `debug_context`，开发阶段可启用 OpenGL 调试包装
 - `engine/core/gameApp.go` 的 `render()` 已接入 `Clear()` 和 `Present()`
 
@@ -243,8 +244,8 @@ func (gr *GLRenderer) Present() {
 
 ## 近期最小任务
 
-阶段 1 已完成，阶段 2 已完成最小纯色矩形闭环，阶段 3 已完成简化版纯色矩形 SpriteBatch，阶段 4 已完成最小 PNG 贴图绘制闭环。下一步建议进入阶段 5：
+阶段 1 已完成，阶段 2 已完成最小纯色矩形闭环，阶段 3 已完成简化版纯色矩形 SpriteBatch，阶段 4 已完成最小 PNG 贴图绘制闭环，阶段 5 已完成最小 ScenePass 与逻辑分辨率 FBO 闭环。下一步建议进入阶段 6：
 
-- 新增 `scenePass.go`
-- 创建 logical size FBO 和 color texture
-- 将 Scene sprite 先绘制到 FBO，再提交到默认 framebuffer
+- 新增 `engine/render/renderer.go`
+- 对外收敛 `BeginFrame`、`DrawRect`、`DrawSprite`、`Present`
+- 让 `game` 层不再直接依赖 `engine/render/opengl`
