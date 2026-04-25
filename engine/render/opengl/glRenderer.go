@@ -143,6 +143,8 @@ func (gr *GLRenderer) DrawRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 }
 
 // 绘制一个逻辑坐标系下的贴图矩形
+//
+// uvRect 按左上原点语义传入，(0,0) 表示纹理左上，(1,1) 表示纹理右下
 func (gr *GLRenderer) DrawTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
 	if gr == nil || gr.rectBatch == nil {
 		return errors.New("gl renderer or rect batch is nil")

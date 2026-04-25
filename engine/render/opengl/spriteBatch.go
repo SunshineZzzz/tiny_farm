@@ -203,7 +203,15 @@ func (b *spriteBatch) queueTexture(texture *Texture, rect mgl32.Vec4, uvRect mgl
 		return errors.New("texture is nil")
 	}
 
-	return b.queueSprite(texture.id, true, rect, uvRect, color)
+	// 对外 UV 语义保持左上为原点，这里统一转换成 OpenGL 采样使用的 v 方向
+	glUVRect := mgl32.Vec4{
+		uvRect.X(),
+		1.0 - uvRect.Y(),
+		uvRect.Z(),
+		1.0 - uvRect.W(),
+	}
+
+	return b.queueSprite(texture.id, true, rect, glUVRect, color)
 }
 
 // 将一个精灵加入本帧队列，纹理命令只合并相邻且纹理一致的段
