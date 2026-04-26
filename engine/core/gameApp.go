@@ -33,6 +33,8 @@ type GameApp struct {
 	sdlInitialized bool
 	// 管理当前 SDL 窗口和 OpenGL 上下文
 	renderer *render.Renderer
+	// 当前帧使用的世界相机
+	camera *render.Camera
 	// 阶段 4 用于验证贴图绘制的临时纹理
 	demoTexture *render.Texture
 	// 游戏配置
@@ -128,17 +130,18 @@ func (a *GameApp) render() {
 		return
 	}
 
+	a.renderer.BeginFrame(a.camera)
 	a.renderer.Clear()
-	a.renderer.DrawRect(mgl32.Vec4{32.0, 32.0, 96.0, 64.0}, mgl32.Vec4{0.9, 0.72, 0.32, 1.0})
-	a.renderer.DrawRect(mgl32.Vec4{144.0, 48.0, 48.0, 96}, mgl32.Vec4{0.38, 0.72, 0.92, 1.0})
-	a.renderer.DrawRect(mgl32.Vec4{216.0, 80.0, 72.0, 40.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
+	a.renderer.DrawWorldRect(mgl32.Vec4{32.0, 32.0, 96.0, 64.0}, mgl32.Vec4{0.9, 0.72, 0.32, 1.0})
+	a.renderer.DrawWorldRect(mgl32.Vec4{144.0, 48.0, 48.0, 96}, mgl32.Vec4{0.38, 0.72, 0.92, 1.0})
+	a.renderer.DrawWorldRect(mgl32.Vec4{216.0, 80.0, 72.0, 40.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
 	if a.demoTexture != nil {
-		a.renderer.DrawRect(mgl32.Vec4{32.0, 4.0, 96.0, 32.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
-		if err := a.renderer.DrawTexture(a.demoTexture, mgl32.Vec4{32.0, 4.0, 96.0, 32.0}, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}); err != nil {
+		a.renderer.DrawWorldRect(mgl32.Vec4{32.0, 4.0, 96.0, 32.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
+		if err := a.renderer.DrawWorldTexture(a.demoTexture, mgl32.Vec4{32.0, 4.0, 96.0, 32.0}, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}); err != nil {
 			slog.Error("draw demo texture failed", slog.Any("err", err))
 		}
-		a.renderer.DrawRect(mgl32.Vec4{32.0, 92.0, 48.0, 32.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
-		if err := a.renderer.DrawTextureSourceRect(a.demoTexture, mgl32.Vec4{32.0, 92.0, 48.0, 32.0}, mgl32.Vec4{0.0, 0.0, 24.0, 16.0}); err != nil {
+		a.renderer.DrawWorldRect(mgl32.Vec4{32.0, 92.0, 48.0, 32.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
+		if err := a.renderer.DrawWorldTextureSourceRect(a.demoTexture, mgl32.Vec4{32.0, 92.0, 48.0, 32.0}, mgl32.Vec4{0.0, 0.0, 24.0, 16.0}); err != nil {
 			slog.Error("draw demo texture source rect failed", slog.Any("err", err))
 		}
 	}
@@ -243,11 +246,7 @@ func (a *GameApp) initGameState() error {
 		return errors.New("create game state failed")
 	}
 	if a.config != nil {
-		logicalSize := mgl32.Vec2{
-			float32(a.config.Window.Width) * a.config.Window.WindowScale,
-			float32(a.config.Window.Height) * a.config.Window.WindowScale,
-		}
-		a.gameState.SetLogicalSize(logicalSize)
+		a.gameState.SetLogicalSize(a.logicalRenderSize())
 	}
 	slog.Debug("game state init success")
 	return nil
@@ -303,16 +302,20 @@ func (a *GameApp) initGLRenderer() error {
 	// 获取逻辑分辨率，窗口大小乘以逻辑缩放比例
 	// 逻辑尺寸定义离屏渲染 FBO 的固定设计分辨率
 	// 窗口缩放只影响窗口初始大小，逻辑缩放决定渲染质量
-	logicalSize := mgl32.Vec2{
-		float32(a.config.Window.Width) * a.config.Window.LogicalScale,
-		float32(a.config.Window.Height) * a.config.Window.LogicalScale,
-	}
+	logicalSize := a.logicalRenderSize()
 	renderer, err := render.NewRenderer(a.window, logicalSize, "config/render.json")
 	if err != nil {
 		return err
 	}
 	a.renderer = renderer
 	a.renderer.SetVSyncEnabled(a.config.Graphics.Vsync)
+	a.renderer.SetViewportClippingEnabled(true)
+	a.renderer.SetPixelSnapEnabled(true)
+	a.camera = render.NewCamera(logicalSize)
+	// 当前阶段还没有地图中心、出生点或跟随目标来决定初始视角
+	// 先把相机中心放到逻辑画布中心附近，使默认可视区域从世界原点附近开始
+	// 这只是骨架阶段的临时默认值，后续应由场景或地图装配决定相机初始位置
+	a.camera.SetPosition(logicalSize.Mul(0.5))
 	demoTexture, err := a.renderer.LoadTexture("assets/tests/Button Normal.png")
 	if err != nil {
 		return err
@@ -320,6 +323,16 @@ func (a *GameApp) initGLRenderer() error {
 	a.demoTexture = demoTexture
 	slog.Debug("open gl renderer success", slog.Any("logicalSize", logicalSize))
 	return nil
+}
+
+func (a *GameApp) logicalRenderSize() mgl32.Vec2 {
+	if a == nil || a.config == nil {
+		return mgl32.Vec2{}
+	}
+	return mgl32.Vec2{
+		float32(a.config.Window.Width) * a.config.Window.LogicalScale,
+		float32(a.config.Window.Height) * a.config.Window.LogicalScale,
+	}
 }
 
 // 初始化输入管理器
@@ -348,6 +361,8 @@ func (a *GameApp) close() {
 		a.renderer.Close()
 		a.renderer = nil
 	}
+
+	a.camera = nil
 
 	if a.window != nil {
 		sdl.DestroyWindow(a.window)
