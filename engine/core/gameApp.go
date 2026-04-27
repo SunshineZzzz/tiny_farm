@@ -145,6 +145,14 @@ func (a *GameApp) render() {
 			slog.Error("draw demo texture source rect failed", slog.Any("err", err))
 		}
 	}
+	if err := a.renderer.DrawUIRect(mgl32.Vec4{8.0, 8.0, 72.0, 16.0}, mgl32.Vec4{0.08, 0.08, 0.1, 1.0}); err != nil {
+		slog.Error("draw demo ui rect failed", slog.Any("err", err))
+	}
+	if a.demoTexture != nil {
+		if err := a.renderer.DrawUITexture(a.demoTexture, mgl32.Vec4{80.0, 10.0, 24.0, 12.0}, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}); err != nil {
+			slog.Error("draw demo ui texture failed", slog.Any("err", err))
+		}
+	}
 	a.renderer.Present()
 }
 

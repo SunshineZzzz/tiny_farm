@@ -15,6 +15,8 @@
 - `engine/render/opengl/spriteBatch.go` 已支持简化版纯色矩形和贴图 SpriteBatch
 - `engine/render/opengl/texture.go` 已支持 PNG 解码、OpenGL texture 创建和 src rect 到 UV 换算
 - `engine/render/opengl/scenePass.go` 已支持 logical size FBO、color texture 和场景离屏清屏
+- `engine/render/opengl/compositePass.go` 已支持将 scene color 合成到默认帧缓冲的 letterbox viewport
+- `engine/render/opengl/uiPass.go` 已支持独立 UI 批处理，并在 CompositePass 之后绘制到默认帧缓冲
 - `engine/render/renderer.go` 已提供最小 facade，当前把 `game` 层和 `engine/render/opengl` 解耦
 - `engine/render/camera.go` 已支持最小 Camera、world 到 logical 变换、viewport clipping 和 pixel snap
 - `config/render.json` 已支持 `debug_context`，开发阶段可启用 OpenGL 调试包装
@@ -198,8 +200,8 @@
 当前 Go 版本与课程实现的差异：
 
 - 已有 `ScenePass`，并且已经在 `Present()` 中完成“场景离屏渲染 → 输出到默认帧缓冲”
-- 还没有独立的 `UIPass`
-- 还没有独立的 `CompositePass`
+- 已有独立的 `CompositePass`
+- 已有独立的 `UIPass`
 - 还没有 `LightingPass`
 - 还没有 `EmissivePass`
 - 还没有 `BloomPass`
@@ -227,8 +229,8 @@
 
 | 子阶段 | 课程 / copy_source 目标 | 当前 Go 状态 | 主要差距 |
 | --- | --- | --- | --- |
-| 8.1 `CompositePass` | 合成 Scene/Lighting/Emissive/Bloom 到默认帧缓冲 viewport | 由 `flushSceneTexture()` 直接回贴 `scenePass.texture()` | 还没有独立合成入口，也没有多输入纹理约束 |
-| 8.2 `UIPass` | UI 精灵绘制到默认帧缓冲 viewport | UI 体系尚未接入渲染 pass | UI 与 Scene 尚未形成独立批处理边界 |
+| 8.1 `CompositePass` | 合成 Scene/Lighting/Emissive/Bloom 到默认帧缓冲 viewport | 已拆出独立 `CompositePass`，当前只接 `scene_color_tex` | 后续还要扩展多输入纹理约束 |
+| 8.2 `UIPass` | UI 精灵绘制到默认帧缓冲 viewport | 已拆出独立 `UIPass`，UI 使用 logical 坐标并在 CompositePass 之后绘制 | 后续还要接入完整 UI 框架 |
 | 8.3 `LightingPass` | 生成 `light_color_tex`，承载环境光、方向光、点光、聚光 | 不存在 | 没有光照缓冲、没有光照提交通道、没有合成入口 |
 | 8.4 `EmissivePass` | 生成 `emissive_color_tex`，承载发光遮罩 | 不存在 | 没有自发光缓冲、没有发光提交通道、没有与 Bloom 的衔接 |
 | 8.5 `BloomPass` | 对 emissive 做降采样、模糊、上采样并输出 `bloom_tex` | 不存在 | 没有后处理缓冲链，也没有开关与成本控制 |
@@ -367,8 +369,8 @@
 
 ## 近期最小任务
 
-阶段 1 到阶段 7 已完成。下一步按拆分后的阶段 8 推进：
+阶段 1 到阶段 8.2 已完成。下一步按拆分后的阶段 8 推进：
 
-- 阶段 8.1：新增 `CompositePass`
-- 阶段 8.2：新增 `UIPass`
-- 阶段 8.3 到 8.5：再继续接 `LightingPass`、`EmissivePass` 和 `BloomPass`
+- 阶段 8.3：新增 `LightingPass`
+- 阶段 8.4：新增 `EmissivePass`
+- 阶段 8.5：新增 `BloomPass`

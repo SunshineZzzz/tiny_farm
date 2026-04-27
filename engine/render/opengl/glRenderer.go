@@ -22,6 +22,8 @@ type GLRenderer struct {
 	scenePass *scenePass
 	// 默认帧缓冲合成输出
 	compositePass *compositePass
+	// 默认帧缓冲 UI 输出
+	uiPass *uiPass
 	// 游戏逻辑窗口大小
 	logicalSize mgl32.Vec2
 	// 默认帧缓冲清屏颜色
@@ -75,6 +77,12 @@ func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJso
 		return err
 	}
 	gr.compositePass = compositePass
+
+	uiPass, err := newUIPass(rc.glContext)
+	if err != nil {
+		return err
+	}
+	gr.uiPass = uiPass
 
 	if err := gr.initRectRenderer(); err != nil {
 		return err
@@ -173,6 +181,37 @@ func (gr *GLRenderer) DrawTextureSourceRect(texture *Texture, dstRect mgl32.Vec4
 	return gr.DrawTexture(texture, dstRect, uvRect)
 }
 
+// 绘制一个 UI 逻辑坐标系下的纯色矩形
+func (gr *GLRenderer) DrawUIRect(rect mgl32.Vec4, color mgl32.Vec4) error {
+	if gr == nil || gr.uiPass == nil {
+		return errors.New("gl renderer or ui pass is nil")
+	}
+	if rect.Z() <= 0 || rect.W() <= 0 {
+		return errors.New("ui rect width or height is invalid")
+	}
+	return gr.uiPass.queueRect(rect, color)
+}
+
+// 绘制一个 UI 逻辑坐标系下的贴图矩形
+func (gr *GLRenderer) DrawUITexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+	if gr == nil || gr.uiPass == nil {
+		return errors.New("gl renderer or ui pass is nil")
+	}
+	if dstRect.Z() <= 0 || dstRect.W() <= 0 {
+		return errors.New("ui dst rect width or height is invalid")
+	}
+	return gr.uiPass.queueTexture(texture, dstRect, uvRect)
+}
+
+// 绘制一个 UI 逻辑坐标系下的贴图源矩形
+func (gr *GLRenderer) DrawUITextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
+	uvRect, err := textureSourceRectUV(texture, srcRect)
+	if err != nil {
+		return err
+	}
+	return gr.DrawUITexture(texture, dstRect, uvRect)
+}
+
 // 从图像文件创建可绘制纹理
 func (gr *GLRenderer) LoadTexture(path string) (*Texture, error) {
 	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
@@ -192,6 +231,9 @@ func (gr *GLRenderer) Present() error {
 		return err
 	}
 	if err := gr.flushCompositePass(); err != nil {
+		return err
+	}
+	if err := gr.flushUIPass(); err != nil {
 		return err
 	}
 
@@ -222,6 +264,10 @@ func (gr *GLRenderer) Close() {
 	if gr.compositePass != nil {
 		gr.compositePass.clean()
 		gr.compositePass = nil
+	}
+	if gr.uiPass != nil {
+		gr.uiPass.clean()
+		gr.uiPass = nil
 	}
 	if gr.renderCtx != nil {
 		gr.renderCtx.clean()
@@ -374,6 +420,20 @@ func (gr *GLRenderer) flushCompositePass() error {
 	return gr.compositePass.render(gr.viewportManager.viewport, compositePassInput{
 		sceneColor: gr.scenePass.texture(),
 	})
+}
+
+// 将 UI 批处理输出到默认 framebuffer 的 letterbox viewport
+func (gr *GLRenderer) flushUIPass() error {
+	if gr == nil || gr.uiPass == nil || gr.viewportManager == nil {
+		return nil
+	}
+
+	// 确保 letterbox viewport 是最新的
+	if gr.viewportManager != nil && gr.viewportManager.dirty {
+		gr.viewportManager.update()
+	}
+
+	return gr.uiPass.render(gr.viewportManager.viewport, gr.logicalSize)
 }
 
 // 释放纯色矩形批量绘制资源

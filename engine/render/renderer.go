@@ -137,6 +137,36 @@ func (r *Renderer) DrawTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, s
 	return r.backend.DrawTextureSourceRect(texture.backend, dstRect, srcRect)
 }
 
+// 绘制 UI 逻辑坐标系下的纯色矩形
+func (r *Renderer) DrawUIRect(rect mgl32.Vec4, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	return r.backend.DrawUIRect(rect, color)
+}
+
+// 绘制 UI 逻辑坐标系下的贴图矩形
+func (r *Renderer) DrawUITexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	return r.backend.DrawUITexture(texture.backend, dstRect, uvRect)
+}
+
+// 绘制 UI 逻辑坐标系下的贴图源矩形
+func (r *Renderer) DrawUITextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	return r.backend.DrawUITextureSourceRect(texture.backend, dstRect, srcRect)
+}
+
 // 绘制世界坐标系下的贴图源矩形
 func (r *Renderer) DrawWorldTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
