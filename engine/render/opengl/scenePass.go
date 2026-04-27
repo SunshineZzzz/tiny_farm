@@ -11,37 +11,66 @@ import (
 
 // 管理场景离屏渲染目标
 //
-// 当前阶段只负责固定 logical size 的颜色缓冲，用于把场景先画到 FBO，
-// 再在 Present 阶段输出到默认 framebuffer
+// 持有场景 FBO、场景批处理和场景 shader，用于把世界内容先绘制到 logical size 的离屏纹理
 type scenePass struct {
 	// 当前线程 OpenGL 函数调用入口
 	glCtx gl.Context
+	// 场景精灵着色器
+	shader *shaderProgram
+	// 场景精灵批处理器
+	batch *spriteBatch
 	// 离屏 framebuffer
 	framebuffer uint32
 	// 离屏颜色纹理
 	colorTexture *Texture
 	// 离屏缓冲尺寸，固定等于逻辑分辨率
 	size mgl32.Vec2
+	// 视图投影 uniform 位置
+	viewProjLocation int32
+	// 场景纹理采样器 uniform 位置
+	textureLocation int32
+	// 批处理是否采样纹理 uniform 位置
+	useTextureLocation int32
 }
 
 // 创建场景离屏渲染目标
-func newScenePass(glCtx gl.Context, logicalSize mgl32.Vec2) (*scenePass, error) {
+func newScenePass(glCtx gl.Context, logicalSize mgl32.Vec2, shader *shaderProgram) (*scenePass, error) {
 	if glCtx == nil {
 		return nil, errors.New("gl context is nil")
 	}
 	if logicalSize.X() <= 0 || logicalSize.Y() <= 0 {
 		return nil, errors.New("logical size is invalid")
 	}
+	if shader == nil {
+		return nil, errors.New("scene shader is nil")
+	}
 
 	pass := &scenePass{
-		glCtx: glCtx,
-		size:  logicalSize,
+		glCtx:  glCtx,
+		shader: shader,
+		size:   logicalSize,
 	}
 	if err := pass.init(); err != nil {
 		pass.clean()
 		return nil, err
 	}
 	return pass, nil
+}
+
+// 将纯色矩形加入场景队列
+func (p *scenePass) queueRect(rect mgl32.Vec4, color mgl32.Vec4) error {
+	if p == nil || p.batch == nil {
+		return errors.New("scene pass is nil")
+	}
+	return p.batch.queueRect(rect, color)
+}
+
+// 将贴图矩形加入场景队列
+func (p *scenePass) queueTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+	if p == nil || p.batch == nil {
+		return errors.New("scene pass is nil")
+	}
+	return p.batch.queueTexture(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
 }
 
 // 清空场景离屏缓冲
@@ -54,6 +83,26 @@ func (p *scenePass) clear(color mgl32.Vec4) {
 	p.glCtx.Viewport(0, 0, int32(p.size.X()), int32(p.size.Y()))
 	p.glCtx.ClearColor(color.X(), color.Y(), color.Z(), color.W())
 	p.glCtx.Clear(gl.COLOR_BUFFER_BIT)
+}
+
+// 将场景队列绘制到 logical size FBO
+func (p *scenePass) render() error {
+	if p == nil || p.glCtx == nil || p.framebuffer == 0 || p.shader == nil || p.batch == nil {
+		return nil
+	}
+
+	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, p.framebuffer)
+	p.glCtx.Viewport(0, 0, int32(p.size.X()), int32(p.size.Y()))
+
+	p.shader.use()
+	viewProj := mgl32.Ortho(0, p.size.X(), p.size.Y(), 0, -1, 1)
+	p.glCtx.UniformMatrix4fv(p.viewProjLocation, viewProj[:])
+	if err := p.batch.flush(p.textureLocation, p.useTextureLocation); err != nil {
+		p.glCtx.UseProgram(0)
+		return err
+	}
+	p.glCtx.UseProgram(0)
+	return nil
 }
 
 // 返回场景输出纹理
@@ -74,14 +123,26 @@ func (p *scenePass) clean() {
 		p.colorTexture.Close()
 		p.colorTexture = nil
 	}
+	if p.batch != nil {
+		p.batch.clean()
+		p.batch = nil
+	}
+	p.shader = nil
 	if p.glCtx != nil && p.framebuffer != 0 {
 		p.glCtx.DeleteFramebuffer(p.framebuffer)
 		p.framebuffer = 0
 	}
+	p.viewProjLocation = -1
+	p.textureLocation = -1
+	p.useTextureLocation = -1
 }
 
-// 初始化 FBO 和颜色纹理
+// 初始化 FBO、颜色纹理、uniform 和批处理资源
 func (p *scenePass) init() error {
+	p.viewProjLocation = p.shader.uniformLocation("uViewProj")
+	p.textureLocation = p.shader.uniformLocation("uTexture")
+	p.useTextureLocation = p.shader.uniformLocation("uUseTexture")
+
 	// 创建FBO
 	framebuffer := p.glCtx.CreateFramebuffer()
 	if framebuffer == 0 {
@@ -130,5 +191,12 @@ func (p *scenePass) init() error {
 		height: height,
 		path:   "scene-pass-color",
 	}
+
+	batch, err := newSpriteBatch(p.glCtx, minSpriteBatchCapacity)
+	if err != nil {
+		return err
+	}
+	p.batch = batch
+
 	return nil
 }

@@ -18,6 +18,8 @@ type GLRenderer struct {
 	renderCtx *renderContext
 	// 视口管理器
 	viewportManager *viewportManager
+	// 统一管理内置 shader program
+	shaderLibrary *shaderLibrary
 	// 场景离屏渲染目标
 	scenePass *scenePass
 	// 默认帧缓冲合成输出
@@ -28,23 +30,13 @@ type GLRenderer struct {
 	logicalSize mgl32.Vec2
 	// 默认帧缓冲清屏颜色
 	clearColor mgl32.Vec4
-
-	// 纯色矩形着色器
-	rectShader *shaderProgram
-	// 纯色矩形批处理器
-	rectBatch *spriteBatch
-	// 纯色矩形视图投影 uniform 位置
-	rectViewProjLocation int32
-	// 批处理纹理采样器 uniform 位置
-	rectTextureLocation int32
-	// 批处理是否采样纹理 uniform 位置
-	rectUseTextureLocation int32
 }
 
 // 创建 GLRenderer 实例
 func NewGLRenderer(window *sdl.Window, logicalSize mgl32.Vec2, paramsJsonPath string) (*GLRenderer, error) {
 	gr := &GLRenderer{}
 	if err := gr.init(window, logicalSize, paramsJsonPath); err != nil {
+		gr.Close()
 		return nil, err
 	}
 	return gr, nil
@@ -66,27 +58,43 @@ func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJso
 	}
 	gr.viewportManager = vm
 
-	scenePass, err := newScenePass(rc.glContext, logicalSize)
+	shaderLibrary, err := newShaderLibrary(rc.glContext)
+	if err != nil {
+		return err
+	}
+	gr.shaderLibrary = shaderLibrary
+
+	sceneShader, err := gr.shaderLibrary.get(shaderSceneSprite)
+	if err != nil {
+		return err
+	}
+	scenePass, err := newScenePass(rc.glContext, logicalSize, sceneShader)
 	if err != nil {
 		return err
 	}
 	gr.scenePass = scenePass
 
-	compositePass, err := newCompositePass(rc.glContext)
+	compositeShader, err := gr.shaderLibrary.get(shaderComposite)
+	if err != nil {
+		return err
+	}
+	compositePass, err := newCompositePass(rc.glContext, compositeShader)
 	if err != nil {
 		return err
 	}
 	gr.compositePass = compositePass
 
-	uiPass, err := newUIPass(rc.glContext)
+	uiShader, err := gr.shaderLibrary.get(shaderUI)
+	if err != nil {
+		return err
+	}
+	uiPass, err := newUIPass(rc.glContext, uiShader)
 	if err != nil {
 		return err
 	}
 	gr.uiPass = uiPass
 
-	if err := gr.initRectRenderer(); err != nil {
-		return err
-	}
+	gr.initBlendState()
 
 	slog.Debug("GLRenderer init success")
 	return nil
@@ -105,6 +113,20 @@ func (gr *GLRenderer) initViewportManager(rc *renderContext, logicalSize mgl32.V
 		return nil, err
 	}
 	return vm, nil
+}
+
+// 初始化当前阶段共用的临时混合状态
+//
+// 现在 ScenePass、CompositePass 和 UIPass 都沿用普通 alpha blend，先放在 GLRenderer 统一设置
+// 后续 Lighting、Emissive、Bloom 接入后，每个 pass 应该按自己的绘制语义显式设置 OpenGL 状态
+func (gr *GLRenderer) initBlendState() {
+	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
+		return
+	}
+
+	glCtx := gr.renderCtx.glContext
+	glCtx.Enable(gl.BLEND)
+	glCtx.BlendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
 }
 
 // 返回游戏逻辑坐标系尺寸
@@ -146,8 +168,8 @@ func (gr *GLRenderer) Clear() {
 // 绘制一个逻辑坐标系下的纯色矩形
 func (gr *GLRenderer) DrawRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	// 检查参数是否有效
-	if gr == nil || gr.rectBatch == nil {
-		return errors.New("gl renderer or rect batch is nil")
+	if gr == nil || gr.scenePass == nil {
+		return errors.New("gl renderer or scene pass is nil")
 	}
 
 	// X = 左上角 x，Y = 左上角 y，Z = 宽度 width，W = 高度 height
@@ -155,21 +177,21 @@ func (gr *GLRenderer) DrawRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 		return errors.New("rect width or height is invalid")
 	}
 
-	return gr.rectBatch.queueRect(rect, color)
+	return gr.scenePass.queueRect(rect, color)
 }
 
 // 绘制一个逻辑坐标系下的贴图矩形
 //
 // uvRect 按左上原点语义传入，(0,0) 表示纹理左上，(1,1) 表示纹理右下
 func (gr *GLRenderer) DrawTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
-	if gr == nil || gr.rectBatch == nil {
-		return errors.New("gl renderer or rect batch is nil")
+	if gr == nil || gr.scenePass == nil {
+		return errors.New("gl renderer or scene pass is nil")
 	}
 	if dstRect.Z() <= 0 || dstRect.W() <= 0 {
 		return errors.New("dst rect width or height is invalid")
 	}
 
-	return gr.rectBatch.queueTexture(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+	return gr.scenePass.queueTexture(texture, dstRect, uvRect)
 }
 
 // 绘制一个逻辑坐标系下的贴图源矩形
@@ -256,7 +278,6 @@ func (gr *GLRenderer) SetVSyncEnabled(enabled bool) {
 
 // 关闭渲染器并释放上下文
 func (gr *GLRenderer) Close() {
-	gr.cleanRectRenderer()
 	if gr.scenePass != nil {
 		gr.scenePass.clean()
 		gr.scenePass = nil
@@ -268,6 +289,10 @@ func (gr *GLRenderer) Close() {
 	if gr.uiPass != nil {
 		gr.uiPass.clean()
 		gr.uiPass = nil
+	}
+	if gr.shaderLibrary != nil {
+		gr.shaderLibrary.clean()
+		gr.shaderLibrary = nil
 	}
 	if gr.renderCtx != nil {
 		gr.renderCtx.clean()
@@ -282,128 +307,13 @@ func (gr *GLRenderer) Resize(width, height int32) {
 	gr.viewportManager.update()
 }
 
-// 初始化纯色矩形批量绘制资源
-func (gr *GLRenderer) initRectRenderer() error {
-	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
-		return errors.New("gl renderer context is nil")
-	}
-
-	// 矩形顶点着色器
-	const rectVertexShaderSource = `
-	#version 330 core
-	layout(location = 0) in vec2 aPos;
-	layout(location = 1) in vec2 aUV;
-	layout(location = 2) in vec4 aColor;
-
-	uniform mat4 uViewProj;
-
-	out vec2 vUV;
-	out vec4 vColor;
-
-	void main() {
-		vUV = aUV;
-		vColor = aColor;
-		gl_Position = uViewProj * vec4(aPos, 0.0, 1.0);
-	}
-	`
-
-	// 矩形片段着色器
-	const rectFragmentShaderSource = `
-	#version 330 core
-	in vec2 vUV;
-	in vec4 vColor;
-
-	uniform sampler2D uTexture;
-	uniform bool uUseTexture;
-
-	out vec4 FragColor;
-
-	void main() {
-		if (uUseTexture) {
-			FragColor = texture(uTexture, vUV) * vColor;
-		} else {
-			FragColor = vColor;
-		}
-	}
-	`
-
-	// 创建着色器程序
-	glCtx := gr.renderCtx.glContext
-	shader, err := newShaderProgram(glCtx, rectVertexShaderSource, rectFragmentShaderSource)
-	if err != nil {
-		return err
-	}
-	gr.rectShader = shader
-
-	// 获取着色器程序中的视图投影矩阵位置
-	gr.rectViewProjLocation = shader.uniformLocation("uViewProj")
-	// 获取着色器程序中的纹理位置
-	gr.rectTextureLocation = shader.uniformLocation("uTexture")
-	// 获取着色器程序中的是否使用纹理位置
-	gr.rectUseTextureLocation = shader.uniformLocation("uUseTexture")
-
-	// 启用混合功能
-	glCtx.Enable(gl.BLEND)
-	// Source (SRC): 准备画上去的新像素（比如你的半透明图片）。
-	// Destination (DST): 已经在屏幕上的像素（底色）。
-	// 结果RGB = 源RGB × 源Alpha + 目标RGB × (1 - 源Alpha)
-	// 结果Alpha = 源Alpha × 1 + 目标Alpha × (1 - 源Alpha)
-	glCtx.BlendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-
-	// 创建纯色矩形批处理器
-	batch, err := newSpriteBatch(glCtx, minSpriteBatchCapacity)
-	if err != nil {
-		gr.cleanRectRenderer()
-		return err
-	}
-	gr.rectBatch = batch
-
-	return nil
-}
-
-// 提交当前帧已入队的矩形
-func (gr *GLRenderer) flushRectRenderer() error {
-	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil || gr.rectShader == nil || gr.rectBatch == nil {
-		return nil
-	}
-
-	glCtx := gr.renderCtx.glContext
-	gr.rectShader.use()
-	/*
-	* |  2/w    0      0     -1 |
-	* |   0   -2/h     0      1 |
-	* |   0     0     -1      0 |
-	* |   0     0      0      1 |
-	*
-	* 对一个点，p = (x, y, z, 1)，乘完以后，
-	* clipX =  2*x/w - 1
-	* clipY = -2*y/h + 1，y越大，clipY越小，从而实现 Y 轴向下增长
-	* clipZ = -z
-	* clipW = 1
-	 */
-	viewProj := mgl32.Ortho(0, gr.logicalSize.X(), gr.logicalSize.Y(), 0, -1, 1)
-	glCtx.UniformMatrix4fv(gr.rectViewProjLocation, viewProj[:])
-	if err := gr.rectBatch.flush(gr.rectTextureLocation, gr.rectUseTextureLocation); err != nil {
-		glCtx.UseProgram(0)
-		return err
-	}
-	glCtx.UseProgram(0)
-	return nil
-}
-
 // 提交场景批处理到 logical size FBO
 func (gr *GLRenderer) flushScenePass() error {
-	if gr == nil || gr.scenePass == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
+	if gr == nil || gr.scenePass == nil {
 		return nil
 	}
 
-	glCtx := gr.renderCtx.glContext
-	// 把“当前画布”切到场景 FBO
-	glCtx.BindFramebuffer(gl.FRAMEBUFFER, gr.scenePass.framebuffer)
-	// 设置视口为场景 FBO 的尺寸
-	glCtx.Viewport(0, 0, int32(gr.logicalSize.X()), int32(gr.logicalSize.Y()))
-	// 把 batch 里的内容画进这张逻辑分辨率的离屏纹理里
-	return gr.flushRectRenderer()
+	return gr.scenePass.render()
 }
 
 // 将场景 FBO 输出交给最终合成 pass
@@ -434,25 +344,4 @@ func (gr *GLRenderer) flushUIPass() error {
 	}
 
 	return gr.uiPass.render(gr.viewportManager.viewport, gr.logicalSize)
-}
-
-// 释放纯色矩形批量绘制资源
-func (gr *GLRenderer) cleanRectRenderer() {
-	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
-		return
-	}
-
-	if gr.rectBatch != nil {
-		gr.rectBatch.clean()
-		gr.rectBatch = nil
-	}
-
-	if gr.rectShader != nil {
-		gr.rectShader.clean()
-		gr.rectShader = nil
-	}
-
-	gr.rectViewProjLocation = -1
-	gr.rectTextureLocation = -1
-	gr.rectUseTextureLocation = -1
 }

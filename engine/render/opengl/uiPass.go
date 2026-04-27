@@ -28,13 +28,17 @@ type uiPass struct {
 }
 
 // 创建 UI pass
-func newUIPass(glCtx gl.Context) (*uiPass, error) {
+func newUIPass(glCtx gl.Context, shader *shaderProgram) (*uiPass, error) {
 	if glCtx == nil {
 		return nil, errors.New("gl context is nil")
 	}
+	if shader == nil {
+		return nil, errors.New("ui shader is nil")
+	}
 
 	pass := &uiPass{
-		glCtx: glCtx,
+		glCtx:  glCtx,
+		shader: shader,
 	}
 	if err := pass.init(); err != nil {
 		pass.clean()
@@ -101,62 +105,17 @@ func (p *uiPass) clean() {
 		p.batch.clean()
 		p.batch = nil
 	}
-	if p.shader != nil {
-		p.shader.clean()
-		p.shader = nil
-	}
+	p.shader = nil
 	p.viewProjLocation = -1
 	p.textureLocation = -1
 	p.useTextureLocation = -1
 }
 
-// 初始化 UI 着色器和批处理资源
+// 初始化 UI uniform 和批处理资源
 func (p *uiPass) init() error {
-	const vertexShaderSource = `
-	#version 330 core
-	layout(location = 0) in vec2 aPos;
-	layout(location = 1) in vec2 aUV;
-	layout(location = 2) in vec4 aColor;
-
-	uniform mat4 uViewProj;
-
-	out vec2 vUV;
-	out vec4 vColor;
-
-	void main() {
-		vUV = aUV;
-		vColor = aColor;
-		gl_Position = uViewProj * vec4(aPos, 0.0, 1.0);
-	}
-	`
-
-	const fragmentShaderSource = `
-	#version 330 core
-	in vec2 vUV;
-	in vec4 vColor;
-
-	uniform sampler2D uTexture;
-	uniform bool uUseTexture;
-
-	out vec4 FragColor;
-
-	void main() {
-		if (uUseTexture) {
-			FragColor = texture(uTexture, vUV) * vColor;
-		} else {
-			FragColor = vColor;
-		}
-	}
-	`
-
-	shader, err := newShaderProgram(p.glCtx, vertexShaderSource, fragmentShaderSource)
-	if err != nil {
-		return err
-	}
-	p.shader = shader
-	p.viewProjLocation = shader.uniformLocation("uViewProj")
-	p.textureLocation = shader.uniformLocation("uTexture")
-	p.useTextureLocation = shader.uniformLocation("uUseTexture")
+	p.viewProjLocation = p.shader.uniformLocation("uViewProj")
+	p.textureLocation = p.shader.uniformLocation("uTexture")
+	p.useTextureLocation = p.shader.uniformLocation("uUseTexture")
 
 	batch, err := newSpriteBatch(p.glCtx, minSpriteBatchCapacity)
 	if err != nil {
