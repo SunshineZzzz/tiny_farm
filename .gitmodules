@@ -1,0 +1,3 @@
+[submodule "copy_source/TinyFarm"]
+	path = copy_source/TinyFarm
+	url = https://github.com/WispSnow/TinyFarm.git

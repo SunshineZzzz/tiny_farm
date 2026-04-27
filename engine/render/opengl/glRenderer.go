@@ -20,6 +20,8 @@ type GLRenderer struct {
 	viewportManager *viewportManager
 	// 场景离屏渲染目标
 	scenePass *scenePass
+	// 默认帧缓冲合成输出
+	compositePass *compositePass
 	// 游戏逻辑窗口大小
 	logicalSize mgl32.Vec2
 	// 默认帧缓冲清屏颜色
@@ -67,6 +69,12 @@ func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJso
 		return err
 	}
 	gr.scenePass = scenePass
+
+	compositePass, err := newCompositePass(rc.glContext)
+	if err != nil {
+		return err
+	}
+	gr.compositePass = compositePass
 
 	if err := gr.initRectRenderer(); err != nil {
 		return err
@@ -183,7 +191,7 @@ func (gr *GLRenderer) Present() error {
 	if err := gr.flushScenePass(); err != nil {
 		return err
 	}
-	if err := gr.flushSceneTexture(); err != nil {
+	if err := gr.flushCompositePass(); err != nil {
 		return err
 	}
 
@@ -210,6 +218,10 @@ func (gr *GLRenderer) Close() {
 	if gr.scenePass != nil {
 		gr.scenePass.clean()
 		gr.scenePass = nil
+	}
+	if gr.compositePass != nil {
+		gr.compositePass.clean()
+		gr.compositePass = nil
 	}
 	if gr.renderCtx != nil {
 		gr.renderCtx.clean()
@@ -348,9 +360,9 @@ func (gr *GLRenderer) flushScenePass() error {
 	return gr.flushRectRenderer()
 }
 
-// 将场景 FBO 输出到默认 framebuffer 的 letterbox viewport
-func (gr *GLRenderer) flushSceneTexture() error {
-	if gr == nil || gr.scenePass == nil || gr.scenePass.texture() == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
+// 将场景 FBO 输出交给最终合成 pass
+func (gr *GLRenderer) flushCompositePass() error {
+	if gr == nil || gr.scenePass == nil || gr.scenePass.texture() == nil || gr.compositePass == nil || gr.viewportManager == nil {
 		return nil
 	}
 
@@ -359,37 +371,9 @@ func (gr *GLRenderer) flushSceneTexture() error {
 		gr.viewportManager.update()
 	}
 
-	// 这个不是用 logicalSize，而是用窗口里的 letterbox 区域的尺寸
-	viewport := gr.viewportManager.viewport
-	glCtx := gr.renderCtx.glContext
-	glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
-	glCtx.Viewport(
-		int32(viewport.Position.X()),
-		int32(viewport.Position.Y()),
-		int32(viewport.Size.X()),
-		int32(viewport.Size.Y()),
-	)
-
-	// 把 scenePass 那张完整场景图，拉伸/缩放后，画到窗口里的 viewport 区域
-	// 注意这里 DrawTexture() 不是立刻就发 draw call，它还是把一个矩形塞进 rectBatch
-	if err := gr.DrawTexture(
-		gr.scenePass.texture(),
-		mgl32.Vec4{0.0, 0.0, viewport.Size.X(), viewport.Size.Y()},
-		mgl32.Vec4{0.0, 0.0, 1.0, 1.0},
-	); err != nil {
-		return err
-	}
-
-	// draw call
-	gr.rectShader.use()
-	viewProj := mgl32.Ortho(0, viewport.Size.X(), viewport.Size.Y(), 0, -1, 1)
-	glCtx.UniformMatrix4fv(gr.rectViewProjLocation, viewProj[:])
-	if err := gr.rectBatch.flush(gr.rectTextureLocation, gr.rectUseTextureLocation); err != nil {
-		glCtx.UseProgram(0)
-		return err
-	}
-	glCtx.UseProgram(0)
-	return nil
+	return gr.compositePass.render(gr.viewportManager.viewport, compositePassInput{
+		sceneColor: gr.scenePass.texture(),
+	})
 }
 
 // 释放纯色矩形批量绘制资源
