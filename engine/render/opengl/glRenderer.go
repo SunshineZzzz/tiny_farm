@@ -22,6 +22,8 @@ type GLRenderer struct {
 	shaderLibrary *shaderLibrary
 	// 场景离屏渲染目标
 	scenePass *scenePass
+	// 世界光照离屏渲染目标
+	lightingPass *lightingPass
 	// 默认帧缓冲合成输出
 	compositePass *compositePass
 	// 默认帧缓冲 UI 输出
@@ -73,6 +75,12 @@ func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJso
 		return err
 	}
 	gr.scenePass = scenePass
+
+	lightingPass, err := newLightingPass(rc.glContext, logicalSize)
+	if err != nil {
+		return err
+	}
+	gr.lightingPass = lightingPass
 
 	compositeShader, err := gr.shaderLibrary.get(shaderComposite)
 	if err != nil {
@@ -145,6 +153,22 @@ func (gr *GLRenderer) SetClearColor(color mgl32.Vec4) {
 	}
 
 	gr.clearColor = color
+}
+
+// 设置世界层环境光颜色
+func (gr *GLRenderer) SetAmbientLightColor(color mgl32.Vec4) {
+	if gr == nil || gr.lightingPass == nil {
+		return
+	}
+	gr.lightingPass.setAmbientColor(color)
+}
+
+// 设置是否启用世界层光照合成
+func (gr *GLRenderer) SetLightingEnabled(enabled bool) {
+	if gr == nil || gr.lightingPass == nil {
+		return
+	}
+	gr.lightingPass.setEnabled(enabled)
 }
 
 // 清空当前帧的默认帧缓冲
@@ -252,6 +276,9 @@ func (gr *GLRenderer) Present() error {
 	if err := gr.flushScenePass(); err != nil {
 		return err
 	}
+	if err := gr.flushLightingPass(); err != nil {
+		return err
+	}
 	if err := gr.flushCompositePass(); err != nil {
 		return err
 	}
@@ -281,6 +308,10 @@ func (gr *GLRenderer) Close() {
 	if gr.scenePass != nil {
 		gr.scenePass.clean()
 		gr.scenePass = nil
+	}
+	if gr.lightingPass != nil {
+		gr.lightingPass.clean()
+		gr.lightingPass = nil
 	}
 	if gr.compositePass != nil {
 		gr.compositePass.clean()
@@ -316,6 +347,15 @@ func (gr *GLRenderer) flushScenePass() error {
 	return gr.scenePass.render()
 }
 
+// 提交世界光照到 logical size FBO
+func (gr *GLRenderer) flushLightingPass() error {
+	if gr == nil || gr.lightingPass == nil {
+		return nil
+	}
+
+	return gr.lightingPass.render()
+}
+
 // 将场景 FBO 输出交给最终合成 pass
 func (gr *GLRenderer) flushCompositePass() error {
 	if gr == nil || gr.scenePass == nil || gr.scenePass.texture() == nil || gr.compositePass == nil || gr.viewportManager == nil {
@@ -329,7 +369,15 @@ func (gr *GLRenderer) flushCompositePass() error {
 
 	return gr.compositePass.render(gr.viewportManager.viewport, compositePassInput{
 		sceneColor: gr.scenePass.texture(),
+		lightColor: gr.lightingTexture(),
 	})
+}
+
+func (gr *GLRenderer) lightingTexture() *Texture {
+	if gr == nil || gr.lightingPass == nil {
+		return nil
+	}
+	return gr.lightingPass.texture()
 }
 
 // 将 UI 批处理输出到默认 framebuffer 的 letterbox viewport

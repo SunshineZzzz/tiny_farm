@@ -15,8 +15,9 @@
 - `engine/render/opengl/spriteBatch.go` 已支持简化版纯色矩形和贴图 SpriteBatch
 - `engine/render/opengl/texture.go` 已支持 PNG 解码、OpenGL texture 创建和 src rect 到 UV 换算
 - `engine/render/opengl/scenePass.go` 已支持 logical size FBO、color texture 和场景离屏清屏
-- `engine/render/opengl/compositePass.go` 已支持将 scene color 合成到默认帧缓冲的 letterbox viewport
+- `engine/render/opengl/compositePass.go` 已支持将 scene color 与 light color 合成到默认帧缓冲的 letterbox viewport，并为缺省 light 输入提供全亮白纹理
 - `engine/render/opengl/uiPass.go` 已支持独立 UI 批处理，并在 CompositePass 之后绘制到默认帧缓冲
+- `engine/render/opengl/lightingPass.go` 已支持 logical size 的 light color FBO 和最小环境光输出，但还没有自己的 light shader 和动态光源绘制
 - `engine/render/renderer.go` 已提供最小 facade，当前把 `game` 层和 `engine/render/opengl` 解耦
 - `engine/render/camera.go` 已支持最小 Camera、world 到 logical 变换、viewport clipping 和 pixel snap
 - `config/render.json` 已支持 `debug_context`，开发阶段可启用 OpenGL 调试包装
@@ -35,17 +36,53 @@
 - `copy_source/TinyFarm/src/engine/render/opengl/shader_library.*`
 - `copy_source/TinyFarm/src/engine/render/opengl/sprite_batch.*`
 - `copy_source/TinyFarm/src/engine/render/opengl/scene_pass.*`
-
-暂缓参考这些模块：
-
 - `lighting_pass.*`
 - `emissive_pass.*`
 - `bloom_pass.*`
 - `composite_pass.*`
-- `imgui_layer.*`
-- UI 框架、ECS 渲染系统、资源管理器的完整实现
+- `renderer.*`
+- `lighting_state.h`
+- `assets/shaders/*.vert`
+- `assets/shaders/*.frag`
 
-这些模块依赖较多，应在基础 sprite 管线稳定后再迁移。
+暂缓完整迁移这些模块：
+
+- `imgui_layer.*`
+- Debug UI 面板
+- ECS 渲染系统、光照系统、昼夜系统
+- 资源管理器、文字渲染、九宫格 UI 的完整实现
+
+这些模块依赖较多，应在基础 pass 管线稳定后分阶段迁移。
+
+## copy_source 渲染能力盘点
+
+`copy_source/TinyFarm` 的渲染实现已经超过“能画 sprite”的范围。当前 Go 版迁移时需要把能力分成主线必做、后续补齐和暂缓三类。
+
+主线必做：
+
+- `ScenePass`：世界精灵输出到 `scene_color_tex`
+- `LightingPass`：点光、聚光、方向光输出到 `light_color_tex`，使用 `light.vert/light.frag` 和加法混合
+- `EmissivePass`：自发光矩形和自发光贴图输出到 `emissive_color_tex`
+- `BloomPass`：对 `emissive_color_tex` 做多级降采样、模糊和上采样，输出 `bloom_tex`
+- `CompositePass`：绑定 scene/light/emissive/bloom 四类输入纹理，使用默认白/黑纹理兜底，合成到默认 framebuffer
+- `UIPass`：UI 精灵绘制到默认 framebuffer 的 letterbox viewport
+- `Renderer` facade：上层只提交 sprite、light、emissive、UI，不直接触碰 OpenGL pass
+
+后续补齐：
+
+- `PassStats`：记录各 pass 的 draw calls、sprite count、vertex count、index count
+- pass preview：暴露 scene/light/emissive/bloom 中间纹理给调试面板
+- 开关与参数：point/spot/directional light、emissive、bloom、pixel snap、viewport clipping、ambient、bloom strength、bloom sigma
+- 默认绘制参数：world/UI 的默认 `ColorOptions` 和 `TransformOptions`
+- draw API 扩展：渐变、旋转、翻转、线段、圆形、九宫格
+- ECS 提交通道：`LightSystem` 从组件收集点光、聚光、自发光，`DayNightSystem` 写入全局环境光和方向光状态
+
+暂缓迁移：
+
+- ImGui Debug UI 和完整调试面板
+- 文字渲染、字体图集和文本样式系统
+- 资源管理器完整实现
+- ECS 渲染排序、InvisibleTag、YSort 等 gameplay 渲染系统
 
 ## 阶段 1：清屏与 Present
 
@@ -202,10 +239,10 @@
 - 已有 `ScenePass`，并且已经在 `Present()` 中完成“场景离屏渲染 → 输出到默认帧缓冲”
 - 已有独立的 `CompositePass`
 - 已有独立的 `UIPass`
-- 还没有 `LightingPass`
+- 已有最小 `LightingPass`，当前只支持通过清屏写入环境光
 - 还没有 `EmissivePass`
 - 还没有 `BloomPass`
-- 还没有多 pass 统一资源装配、开关与调试统计
+- 还没有 `copy_source` 级别的 light shader、动态光源命令缓冲、ambient 分离、emissive/bloom 输入和调试统计
 
 因此，阶段 8 的任务不是“新增某一个 pass”，而是把当前 Go 版“ScenePass + 最小回贴屏幕”演进为与课程文档一致的多 pass 架构。
 
@@ -229,9 +266,9 @@
 
 | 子阶段 | 课程 / copy_source 目标 | 当前 Go 状态 | 主要差距 |
 | --- | --- | --- | --- |
-| 8.1 `CompositePass` | 合成 Scene/Lighting/Emissive/Bloom 到默认帧缓冲 viewport | 已拆出独立 `CompositePass`，当前只接 `scene_color_tex` | 后续还要扩展多输入纹理约束 |
+| 8.1 `CompositePass` | 合成 Scene/Lighting/Emissive/Bloom 到默认帧缓冲 viewport | 已拆出独立 `CompositePass`，当前已接 scene/light，light 缺省为白纹理 | 还缺 ambient uniform、emissive/bloom 输入、黑色默认纹理、bloom strength、专用全屏 quad |
 | 8.2 `UIPass` | UI 精灵绘制到默认帧缓冲 viewport | 已拆出独立 `UIPass`，UI 使用 logical 坐标并在 CompositePass 之后绘制 | 后续还要接入完整 UI 框架 |
-| 8.3 `LightingPass` | 生成 `light_color_tex`，承载环境光、方向光、点光、聚光 | 不存在 | 没有光照缓冲、没有光照提交通道、没有合成入口 |
+| 8.3 `LightingPass` | 生成 `light_color_tex`，承载方向光、点光、聚光；环境光由 CompositePass uniform 合成 | 已有 `light_color_tex` 和最小环境光输出，并已接入 `CompositePass` | 还缺 light shader、清黑加法累计、ambient 分离、方向光/点光/聚光和光照提交通道 |
 | 8.4 `EmissivePass` | 生成 `emissive_color_tex`，承载发光遮罩 | 不存在 | 没有自发光缓冲、没有发光提交通道、没有与 Bloom 的衔接 |
 | 8.5 `BloomPass` | 对 emissive 做降采样、模糊、上采样并输出 `bloom_tex` | 不存在 | 没有后处理缓冲链，也没有开关与成本控制 |
 
@@ -241,7 +278,7 @@
 
 - 把“离屏纹理输出到默认帧缓冲”的逻辑从 `GLRenderer.Present()` 主流程中剥离出来
 - 建立阶段 8 后续所有 pass 的统一合成入口
-- 先只支持 `scene_color_tex` 输入，行为上保持与当前 Go 版一致
+- 从只支持 `scene_color_tex` 逐步扩展到 scene/light/emissive/bloom 多输入合成
 
 要做：
 
@@ -250,12 +287,16 @@
 - 约定 `CompositePass` 的输入纹理接口，哪怕第一版只接 `scene_color_tex`
 - 明确 `CompositePass` 工作在默认帧缓冲和 `letterbox viewport`
 - 保持当前没有光照时的输出结果不变
+- 对齐 `copy_source` 时改为专用全屏 quad，不强制复用 `SpriteBatch`
+- 改为专用全屏 quad 后，清理 composite shader 中因复用 `SpriteBatch` 顶点格式遗留的 `aColor` / `vColor`
+- 为 light/emissive/bloom 建立默认纹理兜底，避免上层没有提交输入时 shader 黑屏或崩溃
 
 验收：
 
 - `GLRenderer.Present()` 不再直接自己拼 scene 输出矩形
 - 默认渲染结果与当前版本一致
 - 关闭后续特效时，基础画面仍完全可用
+- shader 不依赖 `uUseTexture` / `uUseLighting` 这类运行时分支
 
 ### 阶段 8.2：UIPass
 
@@ -285,21 +326,31 @@
 
 - 为世界层引入独立光照缓冲和合成逻辑
 - 对齐课程文档中的 `light_color_tex`
-- 建立最小“光照作为颜色/亮度遮罩参与合成”的闭环
+- 建立最小“光照作为颜色/亮度遮罩参与合成”的闭环，并继续演进到 `copy_source` 的动态光源累计模型
 
 要做：
 
 - 新增 `LightingPass`
 - 新增 `light_color_tex` 对应的 logical FBO
-- 先支持环境光和最小方向光，点光和聚光可分小步接入
-- 在 `CompositePass` 中加入 `scene + light` 的最小合成公式
+- 最小版先支持环境光输出，验证 `scene * light` 的合成链路
+- 对齐 `copy_source` 时改为 `LightingPass` 清黑，动态光源用 `light.vert/light.frag` 写入并使用加法混合累计
+- 将环境光职责迁到 `CompositePass` 的 `uAmbient`，避免和 `light_color_tex` 双算
+- 在 `CompositePass` 中加入 `scene * clamp(light + ambient)` 的合成公式
+- 先接方向光，再接点光和聚光；点光/聚光使用 world-space quad，方向光使用 screen-space quad
 - 明确哪些数据属于 screen-space，哪些数据属于 world-space
 
 验收：
 
 - 能看到基础环境光变暗或提亮效果
-- 光照关闭时，场景退回纯 `ScenePass` 输出
+- 能看到最小方向光渐变效果，且方向光不随相机平移
+- 光照关闭时，场景退回纯 `ScenePass` 输出或使用默认全亮光照输入
 - `LightingPass` 的资源和输入边界独立明确
+- light pass 统计至少能记录 draw calls 和 vertex count
+
+阶段 8.3 当前应拆成两个小步：
+
+- 8.3a 最小环境光闭环：已具备 `light_color_tex`、最小环境光输出和 CompositePass 合成
+- 8.3b 对齐 `copy_source` 光照：补 light shader、清黑加法累计、ambient uniform、方向光/点光/聚光提交 API
 
 ### 阶段 8.4：EmissivePass
 
@@ -314,13 +365,18 @@
 - 新增 `EmissivePass`
 - 新增 `emissive_color_tex` 对应的 logical FBO
 - 建立最小发光矩形或发光贴图提交通道
-- 在 `CompositePass` 中决定 emissive 的基础合成策略
+- 使用独立 emissive shader 或复用可表达 intensity 的 sprite shader
+- `EmissivePass` 内部持有自己的 `SpriteBatch`
+- 在 `Renderer` facade 增加 `addEmissiveRect` / `addEmissiveTexture` 或等价 API
+- 在 `CompositePass` 中接入 `emissive_color_tex`，缺省时绑定 1x1 黑纹理
+- 合成策略先采用 `scene * light + emissive`
 
 验收：
 
 - 发光内容可独立开关
 - 不开启 Bloom 时，也能看到 emissive 基础效果
 - emissive 输出不污染普通 scene color
+- emissive pass 统计至少能记录 sprites、draw calls、vertices、indices
 
 ### 阶段 8.5：BloomPass
 
@@ -335,6 +391,8 @@
 - 新增 `BloomPass`
 - 只处理 `emissive_color_tex`，不直接处理整张 scene color
 - 建立最小降采样、模糊、上采样链路
+- 使用 `blur.frag` 或等价 shader，支持 sigma、direction、texel size uniform
+- 建立 ping-pong FBO/texture 链，先按 `copy_source` 的 4 个 bloom levels 作为参考
 - 在 `CompositePass` 中加入 bloom 输入和强度参数
 - 预留 Bloom 开关和强度配置
 
@@ -343,6 +401,7 @@
 - 无 emissive 时可直接跳过 Bloom
 - 关闭 Bloom 时只保留 emissive 基础效果
 - Bloom 的加入不破坏已有 Scene/Lighting/UI 输出顺序
+- bloom pass 统计至少能记录 draw calls 和 level count
 
 ### 阶段 8 总体约束
 
@@ -351,12 +410,53 @@
 - 后续新增 pass 时，不回退前面已完成的基础结构
 - 每个持有批处理职责的 pass 自己持有自己的 `SpriteBatch`
 - `CompositePass` 这类全屏合成 pass 不强制复用 `SpriteBatch`
+- 所有可选输入纹理都要有默认纹理兜底：light 用白色表示全亮，emissive/bloom 用黑色表示无贡献
+- pass 开关不能让基础画面黑屏或崩溃
+- 暂时不把 Debug UI 当成主线依赖，但 pass 设计要预留统计和中间纹理读取入口
 
 总体验收口径：
 
 - Scene 和 UI 分层清晰
 - 光照、发光、Bloom 关闭时基础画面仍可用
 - 各 pass 的资源释放完整
+
+### 阶段 8.6：调试与运行时控制
+
+目标：
+
+- 对齐 `copy_source` 中 OpenGL Renderer 调试面板需要的数据入口
+- 不强依赖 ImGui，先在渲染后端保留可查询状态
+
+要做：
+
+- 增加 pass stats 结构，记录 scene/lighting/emissive/bloom/ui 的 draw calls、sprites、vertices、indices
+- 暴露 scene/light/emissive/bloom 中间纹理句柄或调试读取入口
+- 增加运行时开关：viewport clipping、pixel snap、point/spot/directional light、emissive、bloom
+- 增加参数入口：ambient、bloom strength、bloom sigma
+
+验收：
+
+- 不打开 Debug UI 也能通过日志或测试读取关键统计
+- 打开/关闭任意可选 pass 不破坏基础 scene + UI 输出
+- 后续接入 ImGui DebugPanel 时不需要重构 pass 边界
+
+## 阶段 9：上层渲染能力补齐
+
+阶段 9 不阻塞多 pass 主线，等 Scene/Lighting/Emissive/Bloom/Composite/UI 的边界稳定后再推进。
+
+对齐 `copy_source` 的后续能力：
+
+- `Renderer` facade 扩展：线段、矩形边框、圆形、渐变、旋转、翻转、默认绘制参数
+- 九宫格 UI：迁移 `nine_slice.*` 的绘制约定和资源描述
+- 文字渲染：参考 `text_renderer.*`、`docs/text_rendering.md`，引入字体图集、glyph 布局和文字样式配置
+- ECS 渲染系统：接入 Transform/Sprite/Render 三组件、layer/depth 排序、YSort、InvisibleTag 过滤
+- 资源管理器：统一纹理、字体和图集资源生命周期
+
+验收：
+
+- 上层系统只依赖 `engine/render.Renderer`，不直接依赖 OpenGL pass
+- UI、文字、世界精灵的坐标空间和默认参数边界清晰
+- 大型系统迁移不改变阶段 8 的 pass 执行顺序
 
 ## 实施原则
 
@@ -369,8 +469,9 @@
 
 ## 近期最小任务
 
-阶段 1 到阶段 8.2 已完成。下一步按拆分后的阶段 8 推进：
+阶段 1 到阶段 8.3a 的最小环境光闭环已完成。下一步不要直接跳到 Bloom，应先补齐阶段 8.3b，避免后续 emissive/bloom 接入后再回头改 light/ambient 的职责边界。
 
-- 阶段 8.3：新增 `LightingPass`
-- 阶段 8.4：新增 `EmissivePass`
-- 阶段 8.5：新增 `BloomPass`
+- 阶段 8.3b：对齐 `copy_source` 光照模型，补 light shader、动态光源累计和 `CompositePass.uAmbient`
+- 阶段 8.4：新增 `EmissivePass`，接入 `emissive_color_tex` 和 CompositePass 黑纹理兜底
+- 阶段 8.5：新增 `BloomPass`，只处理 emissive 输出，并接入 bloom strength / bloom 开关
+- 阶段 8.6：补 pass stats、中间纹理预览入口和运行时开关

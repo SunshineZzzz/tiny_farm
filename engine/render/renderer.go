@@ -62,6 +62,22 @@ func (r *Renderer) SetClearColor(color mgl32.Vec4) {
 	r.backend.SetClearColor(color)
 }
 
+// 设置世界层环境光颜色
+func (r *Renderer) SetAmbientLightColor(color mgl32.Vec4) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetAmbientLightColor(color)
+}
+
+// 设置是否启用世界层光照合成
+func (r *Renderer) SetLightingEnabled(enabled bool) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetLightingEnabled(enabled)
+}
+
 // 开始一帧世界渲染
 func (r *Renderer) BeginFrame(camera *Camera) {
 	if r == nil || r.backend == nil {

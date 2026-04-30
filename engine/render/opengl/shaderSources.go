@@ -101,16 +101,16 @@ in vec2 vUV;
 in vec4 vColor;
 
 uniform sampler2D uSceneColor;
-uniform bool uUseTexture;
+uniform sampler2D uLightColor;
 
 out vec4 FragColor;
 
 void main() {
-	if (uUseTexture) {
-		FragColor = texture(uSceneColor, vUV) * vColor;
-	} else {
-		FragColor = vColor;
-	}
+	// vColor 没实际意义，因为 CompositePass 复用了 SpriteBatch，所以 shader 还带着 vColor。但实际传入永远是白色
+	vec4 sceneColor = texture(uSceneColor, vUV) * vColor;
+	// light 里暂时放的是环境光，只是把 light texture 清成环境光颜色。所以 composite 目前只能做“全屏变暗/变亮”，还不能做真正的点光/方向光效果
+	vec4 lightColor = texture(uLightColor, vUV);
+	FragColor = vec4(sceneColor.rgb * lightColor.rgb, sceneColor.a);
 }
 `
 

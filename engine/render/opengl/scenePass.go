@@ -38,7 +38,7 @@ func newScenePass(glCtx gl.Context, logicalSize mgl32.Vec2, shader *shaderProgra
 	if glCtx == nil {
 		return nil, errors.New("gl context is nil")
 	}
-	if logicalSize.X() <= 0 || logicalSize.Y() <= 0 {
+	if logicalSize.X() <= 0.0 || logicalSize.Y() <= 0.0 {
 		return nil, errors.New("logical size is invalid")
 	}
 	if shader == nil {

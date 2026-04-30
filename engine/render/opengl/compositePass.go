@@ -20,12 +20,14 @@ type compositePass struct {
 	shader *shaderProgram
 	// 全屏合成批处理器
 	batch *spriteBatch
+	// 光照输入缺省白纹理，表示全亮
+	defaultLightTexture *Texture
 	// 视图投影 uniform 位置
 	viewProjLocation int32
 	// 场景纹理采样器 uniform 位置
 	sceneTextureLocation int32
-	// 批处理是否采样纹理 uniform 位置
-	useTextureLocation int32
+	// 光照纹理采样器 uniform 位置
+	lightTextureLocation int32
 }
 
 // 合成输入纹理集合
@@ -34,6 +36,8 @@ type compositePass struct {
 type compositePassInput struct {
 	// ScenePass 输出的颜色纹理
 	sceneColor *Texture
+	// LightingPass 输出的光照纹理，为 nil 时使用全亮白纹理
+	lightColor *Texture
 }
 
 // 创建最终合成 pass
@@ -70,6 +74,14 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 		return errors.New("composite viewport size is invalid")
 	}
 
+	lightColor := input.lightColor
+	if lightColor == nil {
+		lightColor = p.defaultLightTexture
+	}
+	if lightColor == nil || lightColor.id == 0 {
+		return errors.New("composite light texture is nil")
+	}
+
 	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
 	p.glCtx.Viewport(
 		int32(viewport.Position.X()),
@@ -90,7 +102,26 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 	p.shader.use()
 	viewProj := mgl32.Ortho(0, viewport.Size.X(), viewport.Size.Y(), 0, -1, 1)
 	p.glCtx.UniformMatrix4fv(p.viewProjLocation, viewProj[:])
-	if err := p.batch.flush(p.sceneTextureLocation, p.useTextureLocation); err != nil {
+	// 第1号纹理单元
+	const lightTextureUnit = gl.TEXTURE0 + 1
+	// shader uLightColor使用纹理单元 1
+	p.glCtx.Uniform1i(p.lightTextureLocation, 1)
+	// 激活纹理单元1
+	p.glCtx.ActiveTexture(lightTextureUnit)
+	// 绑定光照纹理到纹理单元1
+	p.glCtx.BindTexture(gl.TEXTURE_2D, lightColor.id)
+
+	// 收尾清理
+	defer func() {
+		// 切回GL_TEXTURE1
+		p.glCtx.ActiveTexture(lightTextureUnit)
+		// 把GL_TEXTURE1上绑定的light texture解绑
+		p.glCtx.BindTexture(gl.TEXTURE_2D, 0)
+		// 再把当前活动纹理单元恢复到GL_TEXTURE0
+		p.glCtx.ActiveTexture(gl.TEXTURE0)
+	}()
+
+	if err := p.batch.flush(p.sceneTextureLocation, -1); err != nil {
 		p.glCtx.UseProgram(0)
 		return err
 	}
@@ -108,17 +139,21 @@ func (p *compositePass) clean() {
 		p.batch.clean()
 		p.batch = nil
 	}
+	if p.defaultLightTexture != nil {
+		p.defaultLightTexture.Close()
+		p.defaultLightTexture = nil
+	}
 	p.shader = nil
 	p.viewProjLocation = -1
 	p.sceneTextureLocation = -1
-	p.useTextureLocation = -1
+	p.lightTextureLocation = -1
 }
 
 // 初始化合成 uniform 和批处理资源
 func (p *compositePass) init() error {
 	p.viewProjLocation = p.shader.uniformLocation("uViewProj")
 	p.sceneTextureLocation = p.shader.uniformLocation("uSceneColor")
-	p.useTextureLocation = p.shader.uniformLocation("uUseTexture")
+	p.lightTextureLocation = p.shader.uniformLocation("uLightColor")
 
 	batch, err := newSpriteBatch(p.glCtx, minSpriteBatchCapacity)
 	if err != nil {
@@ -126,5 +161,40 @@ func (p *compositePass) init() error {
 	}
 	p.batch = batch
 
+	defaultLightTexture, err := newSolidTexture(p.glCtx, [4]byte{255, 255, 255, 255}, "composite-default-light")
+	if err != nil {
+		return err
+	}
+	p.defaultLightTexture = defaultLightTexture
+
 	return nil
+}
+
+// 创建单像素纯色纹理，用于 pass 输入缺省值
+func newSolidTexture(glCtx gl.Context, pixel [4]byte, path string) (*Texture, error) {
+	if glCtx == nil {
+		return nil, errors.New("gl context is nil")
+	}
+
+	textureID := glCtx.CreateTexture()
+	if textureID == 0 {
+		return nil, errors.New("create solid texture failed")
+	}
+
+	glCtx.BindTexture(gl.TEXTURE_2D, textureID)
+	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
+	glCtx.TexImage2D(gl.TEXTURE_2D, 0, int32(gl.RGBA), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel[:])
+	glCtx.BindTexture(gl.TEXTURE_2D, 0)
+
+	return &Texture{
+		glCtx:  glCtx,
+		id:     textureID,
+		width:  1,
+		height: 1,
+		path:   path,
+	}, nil
 }

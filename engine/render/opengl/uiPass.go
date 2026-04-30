@@ -72,7 +72,7 @@ func (p *uiPass) render(viewport emath.Rect, logicalSize mgl32.Vec2) error {
 	if viewport.Size.X() <= 0 || viewport.Size.Y() <= 0 {
 		return errors.New("ui viewport size is invalid")
 	}
-	if logicalSize.X() <= 0 || logicalSize.Y() <= 0 {
+	if logicalSize.X() <= 0.0 || logicalSize.Y() <= 0.0 {
 		return errors.New("ui logical size is invalid")
 	}
 
