@@ -428,6 +428,12 @@ func resolvePointLightOptions(options *PointLightOptions) PointLightOptions {
 		}
 	}
 	resolved := *options
+	if resolved.Color.X() == 0.0 &&
+		resolved.Color.Y() == 0.0 &&
+		resolved.Color.Z() == 0.0 &&
+		resolved.Color.W() == 0.0 {
+		resolved.Color = mgl32.Vec4{1.0, 1.0, 1.0, 1.0}
+	}
 	if resolved.Intensity <= 0.0 {
 		resolved.Intensity = 1.0
 	}
@@ -447,6 +453,12 @@ func resolveSpotLightOptions(options *SpotLightOptions) SpotLightOptions {
 	}
 
 	resolved := *options
+	if resolved.Color.X() == 0.0 &&
+		resolved.Color.Y() == 0.0 &&
+		resolved.Color.Z() == 0.0 &&
+		resolved.Color.W() == 0.0 {
+		resolved.Color = mgl32.Vec4{1.0, 1.0, 1.0, 1.0}
+	}
 	if resolved.Intensity <= 0.0 {
 		resolved.Intensity = 1.0
 	}
@@ -472,6 +484,12 @@ func resolveDirectionalLightOptions(options *DirectionalLightOptions) Directiona
 		}
 	}
 	resolved := *options
+	if resolved.Color.X() == 0.0 &&
+		resolved.Color.Y() == 0.0 &&
+		resolved.Color.Z() == 0.0 &&
+		resolved.Color.W() == 0.0 {
+		resolved.Color = mgl32.Vec4{1.0, 1.0, 1.0, 1.0}
+	}
 	if resolved.Intensity <= 0.0 {
 		resolved.Intensity = 1.0
 	}
