@@ -239,6 +239,8 @@ func (p *lightingPass) queuePointLight(position mgl32.Vec2, radius float32, colo
 }
 
 // 提交聚光灯
+//
+// direction 使用 logical 坐标方向，传入 shader 前会转换成局部 UV 方向
 func (p *lightingPass) queueSpotLight(position mgl32.Vec2, radius float32, direction mgl32.Vec2, color mgl32.Vec4, intensity float32, innerAngleDeg float32, outerAngleDeg float32) error {
 	if p == nil {
 		return errors.New("lighting pass is nil")
@@ -254,13 +256,14 @@ func (p *lightingPass) queueSpotLight(position mgl32.Vec2, radius float32, direc
 		innerCos, outerCos = outerCos, innerCos
 	}
 
+	spotDir := emath.SafeNormalizeVec2(mgl32.Vec2{direction.X(), -direction.Y()}, mgl32.Vec2{0.0, -1.0})
 	p.commands = append(p.commands, lightCommand{
 		lightType:    lightTypeSpot,
 		position:     position,
 		radius:       radius,
 		color:        color,
 		intensity:    intensity,
-		spotDir:      emath.SafeNormalizeVec2(direction, mgl32.Vec2{0.0, 1.0}),
+		spotDir:      spotDir,
 		spotInnerCos: innerCos,
 		spotOuterCos: outerCos,
 	})
@@ -268,6 +271,8 @@ func (p *lightingPass) queueSpotLight(position mgl32.Vec2, radius float32, direc
 }
 
 // 提交屏幕空间方向光
+//
+// direction 使用 logical 坐标方向，传入 shader 前会转换成局部 UV 方向
 func (p *lightingPass) queueDirectionalLight(direction mgl32.Vec2, color mgl32.Vec4, intensity float32, offset float32, softness float32, middayBlend float32) error {
 	if p == nil {
 		return errors.New("lighting pass is nil")
@@ -277,11 +282,12 @@ func (p *lightingPass) queueDirectionalLight(direction mgl32.Vec2, color mgl32.V
 		return nil
 	}
 
+	dir2D := mgl32.Vec2{direction.X(), -direction.Y()}
 	p.commands = append(p.commands, lightCommand{
 		lightType:   lightTypeDirectional,
 		color:       color,
 		intensity:   intensity,
-		dir2D:       direction,
+		dir2D:       dir2D,
 		dirOffset:   mgl32.Clamp(offset, 0.0, 1.0),
 		dirSoftness: mgl32.Clamp(softness, 0.0001, 0.49),
 		middayBlend: mgl32.Clamp(middayBlend, 0.0, 1.0),
