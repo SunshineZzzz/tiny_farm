@@ -283,8 +283,8 @@ func (b *spriteBatch) flush(textureLocation int32, useTextureLocation int32) err
 	}
 
 	// 绑定之前准备好的VAO，恢复这套顶点解释规则
-	// 绑定VBO，上传顶点数据
 	b.glCtx.BindVertexArray(b.vao)
+	// 绑定VBO，上传顶点数据
 	b.glCtx.BindBuffer(gl.ARRAY_BUFFER, b.vbo)
 	b.glCtx.BufferSubData(gl.ARRAY_BUFFER, 0, utils.Float32Bytes(b.vertices))
 	// 绑定EBO，上传索引数据

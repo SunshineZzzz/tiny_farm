@@ -319,7 +319,7 @@ func (a *GameApp) initGLRenderer() error {
 	a.renderer.SetVSyncEnabled(a.config.Graphics.Vsync)
 	a.renderer.SetViewportClippingEnabled(true)
 	a.renderer.SetPixelSnapEnabled(true)
-	a.renderer.SetAmbientLightColor(mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+	a.renderer.SetAmbientLightColor(mgl32.Vec4{0.0, 0.0, 0.0, 1.0})
 	a.camera = render.NewCamera(logicalSize)
 	// 当前阶段还没有地图中心、出生点或跟随目标来决定初始视角
 	// 先把相机中心放到逻辑画布中心附近，使默认可视区域从世界原点附近开始

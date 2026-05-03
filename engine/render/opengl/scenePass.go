@@ -95,6 +95,19 @@ func (p *scenePass) render() error {
 	p.glCtx.Viewport(0, 0, int32(p.size.X()), int32(p.size.Y()))
 
 	p.shader.use()
+	// 设置视图投影矩阵
+	/*
+	* |  2/w    0      0     -1 |
+	* |   0   -2/h     0      1 |
+	* |   0     0     -1      0 |
+	* |   0     0      0      1 |
+	*
+	* 对一个点，p = (x, y, z, 1)，乘完以后，
+	* clipX =  2*x/w - 1
+	* clipY = -2*y/h + 1， y越大，clipY越小，从而实现了Y轴向下增长的坐标系
+	* clipZ = -z
+	* clipW = 1
+	 */
 	viewProj := mgl32.Ortho(0, p.size.X(), p.size.Y(), 0, -1, 1)
 	p.glCtx.UniformMatrix4fv(p.viewProjLocation, viewProj[:])
 	if err := p.batch.flush(p.textureLocation, p.useTextureLocation); err != nil {
@@ -143,6 +156,10 @@ func (p *scenePass) init() error {
 	p.textureLocation = p.shader.uniformLocation("uTexture")
 	p.useTextureLocation = p.shader.uniformLocation("uUseTexture")
 
+	if p.viewProjLocation < 0 || p.textureLocation < 0 || p.useTextureLocation < 0 {
+		return errors.New("scene pass uniform location is invalid")
+	}
+
 	// 创建FBO
 	framebuffer := p.glCtx.CreateFramebuffer()
 	if framebuffer == 0 {
@@ -167,7 +184,7 @@ func (p *scenePass) init() error {
 	p.glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 	p.glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	p.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
-	// 上传颜色纹理像素数据
+	// 只分配纹理内存，不上传初始像素内容，因为这张纹理后面会被 framebuffer 写入
 	p.glCtx.TexImage2D(gl.TEXTURE_2D, 0, int32(gl.RGBA), width, height, gl.RGBA, gl.UNSIGNED_BYTE, nil)
 	p.glCtx.BindTexture(gl.TEXTURE_2D, 0)
 

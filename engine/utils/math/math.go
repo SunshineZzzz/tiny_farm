@@ -172,3 +172,14 @@ func ComputeLetterboxMetrics(windowSize, logicalSize mgl32.Vec2) LetterboxMetric
 	result.Viewport.Position = windowSize.Sub(viewportSize).Mul(0.5)
 	return result
 }
+
+// 安全归一化2维向量
+func SafeNormalizeVec2(v mgl32.Vec2, fallback mgl32.Vec2) mgl32.Vec2 {
+	const eps = 1e-5
+	lenSq := v.X()*v.X() + v.Y()*v.Y()
+	if lenSq < eps*eps {
+		return fallback
+	}
+	invLen := float32(1.0 / math.Sqrt(float64(lenSq)))
+	return v.Mul(invLen)
+}

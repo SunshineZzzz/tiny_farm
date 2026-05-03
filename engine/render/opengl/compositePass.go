@@ -22,12 +22,16 @@ type compositePass struct {
 	batch *spriteBatch
 	// 光照输入缺省白纹理，表示全亮
 	defaultLightTexture *Texture
+	// 环境光颜色，RGB 表示基础亮度
+	ambientColor mgl32.Vec4
 	// 视图投影 uniform 位置
 	viewProjLocation int32
 	// 场景纹理采样器 uniform 位置
 	sceneTextureLocation int32
 	// 光照纹理采样器 uniform 位置
 	lightTextureLocation int32
+	// 环境光 uniform 位置
+	ambientLocation int32
 }
 
 // 合成输入纹理集合
@@ -50,8 +54,9 @@ func newCompositePass(glCtx gl.Context, shader *shaderProgram) (*compositePass, 
 	}
 
 	pass := &compositePass{
-		glCtx:  glCtx,
-		shader: shader,
+		glCtx:        glCtx,
+		shader:       shader,
+		ambientColor: mgl32.Vec4{1.0, 1.0, 1.0, 1.0},
 	}
 	if err := pass.init(); err != nil {
 		pass.clean()
@@ -106,6 +111,11 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 	const lightTextureUnit = gl.TEXTURE0 + 1
 	// shader uLightColor使用纹理单元 1
 	p.glCtx.Uniform1i(p.lightTextureLocation, 1)
+	p.glCtx.Uniform3fv(p.ambientLocation, []float32{
+		p.ambientColor.X(),
+		p.ambientColor.Y(),
+		p.ambientColor.Z(),
+	})
 	// 激活纹理单元1
 	p.glCtx.ActiveTexture(lightTextureUnit)
 	// 绑定光照纹理到纹理单元1
@@ -129,6 +139,14 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 	return nil
 }
 
+// 设置环境光颜色
+func (p *compositePass) setAmbientColor(color mgl32.Vec4) {
+	if p == nil {
+		return
+	}
+	p.ambientColor = mgl32.Vec4{color.X(), color.Y(), color.Z(), 1.0}
+}
+
 // 释放合成 pass 的 OpenGL 资源
 func (p *compositePass) clean() {
 	if p == nil {
@@ -147,6 +165,7 @@ func (p *compositePass) clean() {
 	p.viewProjLocation = -1
 	p.sceneTextureLocation = -1
 	p.lightTextureLocation = -1
+	p.ambientLocation = -1
 }
 
 // 初始化合成 uniform 和批处理资源
@@ -154,6 +173,12 @@ func (p *compositePass) init() error {
 	p.viewProjLocation = p.shader.uniformLocation("uViewProj")
 	p.sceneTextureLocation = p.shader.uniformLocation("uSceneColor")
 	p.lightTextureLocation = p.shader.uniformLocation("uLightColor")
+	p.ambientLocation = p.shader.uniformLocation("uAmbient")
+
+	if p.viewProjLocation < 0 || p.sceneTextureLocation < 0 ||
+		p.lightTextureLocation < 0 || p.ambientLocation < 0 {
+		return errors.New("composite pass uniform location is invalid")
+	}
 
 	batch, err := newSpriteBatch(p.glCtx, minSpriteBatchCapacity)
 	if err != nil {

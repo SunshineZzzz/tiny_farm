@@ -33,6 +33,40 @@ type Texture struct {
 	backend *opengl.Texture
 }
 
+// 点光源绘制参数
+type PointLightOptions struct {
+	// 光源颜色，RGB 表示颜色，Alpha 当前不参与计算
+	Color mgl32.Vec4
+	// 光源强度
+	Intensity float32
+}
+
+// 聚光灯绘制参数
+type SpotLightOptions struct {
+	// 光源颜色，RGB 表示颜色，Alpha 当前不参与计算
+	Color mgl32.Vec4
+	// 光源强度
+	Intensity float32
+	// 内锥角度，单位为度
+	InnerAngleDeg float32
+	// 外锥角度，单位为度
+	OuterAngleDeg float32
+}
+
+// 方向光绘制参数
+type DirectionalLightOptions struct {
+	// 光源颜色，RGB 表示颜色，Alpha 当前不参与计算
+	Color mgl32.Vec4
+	// 光源强度
+	Intensity float32
+	// 屏幕空间渐变中心偏移，范围为 0 到 1
+	Offset float32
+	// 屏幕空间渐变柔和范围，范围为 0 到 0.5
+	Softness float32
+	// 正午混合强度，范围为 0 到 1
+	MiddayBlend float32
+}
+
 // 创建渲染器 facade
 func NewRenderer(window *sdl.Window, logicalSize mgl32.Vec2, paramsJSONPath string) (*Renderer, error) {
 	backend, err := opengl.NewGLRenderer(window, logicalSize, paramsJSONPath)
@@ -76,6 +110,66 @@ func (r *Renderer) SetLightingEnabled(enabled bool) {
 		return
 	}
 	r.backend.SetLightingEnabled(enabled)
+}
+
+// 提交 logical 坐标系下的点光源
+func (r *Renderer) AddPointLight(position mgl32.Vec2, radius float32, options *PointLightOptions) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+
+	resolved := resolvePointLightOptions(options)
+	return r.backend.AddPointLight(position, radius, resolved.Color, resolved.Intensity)
+}
+
+// 提交 world 坐标系下的点光源
+func (r *Renderer) AddWorldPointLight(position mgl32.Vec2, radius float32, options *PointLightOptions) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+
+	logicalPosition := position
+	logicalRadius := radius
+	if r.currentCamera != nil {
+		logicalPosition = r.currentCamera.WorldToLogical(position)
+		logicalRadius = radius * r.currentCamera.Zoom()
+	}
+	return r.AddPointLight(logicalPosition, logicalRadius, options)
+}
+
+// 提交 logical 坐标系下的聚光灯
+func (r *Renderer) AddSpotLight(position mgl32.Vec2, radius float32, direction mgl32.Vec2, options *SpotLightOptions) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+
+	resolved := resolveSpotLightOptions(options)
+	return r.backend.AddSpotLight(position, radius, direction, resolved.Color, resolved.Intensity, resolved.InnerAngleDeg, resolved.OuterAngleDeg)
+}
+
+// 提交 world 坐标系下的聚光灯
+func (r *Renderer) AddWorldSpotLight(position mgl32.Vec2, radius float32, direction mgl32.Vec2, options *SpotLightOptions) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+
+	logicalPosition := position
+	logicalRadius := radius
+	if r.currentCamera != nil {
+		logicalPosition = r.currentCamera.WorldToLogical(position)
+		logicalRadius = radius * r.currentCamera.Zoom()
+	}
+	return r.AddSpotLight(logicalPosition, logicalRadius, direction, options)
+}
+
+// 提交屏幕空间方向光
+func (r *Renderer) AddDirectionalLight(direction mgl32.Vec2, options *DirectionalLightOptions) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+
+	resolved := resolveDirectionalLightOptions(options)
+	return r.backend.AddDirectionalLight(direction, resolved.Color, resolved.Intensity, resolved.Offset, resolved.Softness, resolved.MiddayBlend)
 }
 
 // 开始一帧世界渲染
@@ -322,4 +416,67 @@ func (r *Renderer) shouldCullWorldRect(rect mgl32.Vec4) bool {
 		rectMin.X() >= viewMax.X() ||
 		rectMax.Y() <= viewMin.Y() ||
 		rectMin.Y() >= viewMax.Y()
+}
+
+// 补全点光源绘制参数
+// 当前允许调用方传nil，使用白色、强度为1的默认点光源
+func resolvePointLightOptions(options *PointLightOptions) PointLightOptions {
+	if options == nil {
+		return PointLightOptions{
+			Color:     mgl32.Vec4{1.0, 1.0, 1.0, 1.0},
+			Intensity: 1.0,
+		}
+	}
+	resolved := *options
+	if resolved.Intensity <= 0.0 {
+		resolved.Intensity = 1.0
+	}
+	return resolved
+}
+
+// 补全聚光灯绘制参数
+// 当前允许调用方传nil， 使用白色、强度为1的默认聚光灯角度
+func resolveSpotLightOptions(options *SpotLightOptions) SpotLightOptions {
+	if options == nil {
+		return SpotLightOptions{
+			Color:         mgl32.Vec4{1.0, 1.0, 1.0, 1.0},
+			Intensity:     1.0,
+			InnerAngleDeg: 20.0,
+			OuterAngleDeg: 35.0,
+		}
+	}
+
+	resolved := *options
+	if resolved.Intensity <= 0.0 {
+		resolved.Intensity = 1.0
+	}
+	if resolved.InnerAngleDeg <= 0.0 {
+		resolved.InnerAngleDeg = 20.0
+	}
+	if resolved.OuterAngleDeg <= 0.0 {
+		resolved.OuterAngleDeg = 35.0
+	}
+	return resolved
+}
+
+// 补全方向光绘制参数
+// 当前允许调用方传nil， 使用白色、强度为1的默认屏幕渐变参数
+func resolveDirectionalLightOptions(options *DirectionalLightOptions) DirectionalLightOptions {
+	if options == nil {
+		return DirectionalLightOptions{
+			Color:       mgl32.Vec4{1.0, 1.0, 1.0, 1.0},
+			Intensity:   1.0,
+			Offset:      0.5,
+			Softness:    0.1,
+			MiddayBlend: 0.0,
+		}
+	}
+	resolved := *options
+	if resolved.Intensity <= 0.0 {
+		resolved.Intensity = 1.0
+	}
+	if resolved.Softness <= 0.0 {
+		resolved.Softness = 0.1
+	}
+	return resolved
 }

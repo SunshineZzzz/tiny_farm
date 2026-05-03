@@ -76,7 +76,11 @@ func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJso
 	}
 	gr.scenePass = scenePass
 
-	lightingPass, err := newLightingPass(rc.glContext, logicalSize)
+	lightingShader, err := gr.shaderLibrary.get(shaderLight)
+	if err != nil {
+		return err
+	}
+	lightingPass, err := newLightingPass(rc.glContext, logicalSize, lightingShader)
 	if err != nil {
 		return err
 	}
@@ -157,10 +161,10 @@ func (gr *GLRenderer) SetClearColor(color mgl32.Vec4) {
 
 // 设置世界层环境光颜色
 func (gr *GLRenderer) SetAmbientLightColor(color mgl32.Vec4) {
-	if gr == nil || gr.lightingPass == nil {
+	if gr == nil || gr.compositePass == nil {
 		return
 	}
-	gr.lightingPass.setAmbientColor(color)
+	gr.compositePass.setAmbientColor(color)
 }
 
 // 设置是否启用世界层光照合成
@@ -169,6 +173,30 @@ func (gr *GLRenderer) SetLightingEnabled(enabled bool) {
 		return
 	}
 	gr.lightingPass.setEnabled(enabled)
+}
+
+// 提交 logical 坐标系下的点光源
+func (gr *GLRenderer) AddPointLight(position mgl32.Vec2, radius float32, color mgl32.Vec4, intensity float32) error {
+	if gr == nil || gr.lightingPass == nil {
+		return errors.New("gl renderer or lighting pass is nil")
+	}
+	return gr.lightingPass.queuePointLight(position, radius, color, intensity)
+}
+
+// 提交 logical 坐标系下的聚光源
+func (gr *GLRenderer) AddSpotLight(position mgl32.Vec2, radius float32, direction mgl32.Vec2, color mgl32.Vec4, intensity float32, innerAngleDeg float32, outerAngleDeg float32) error {
+	if gr == nil || gr.lightingPass == nil {
+		return errors.New("gl renderer or lighting pass is nil")
+	}
+	return gr.lightingPass.queueSpotLight(position, radius, direction, color, intensity, innerAngleDeg, outerAngleDeg)
+}
+
+// 提交屏幕空间方向光
+func (gr *GLRenderer) AddDirectionalLight(direction mgl32.Vec2, color mgl32.Vec4, intensity float32, offset float32, softness float32, middayBlend float32) error {
+	if gr == nil || gr.lightingPass == nil {
+		return errors.New("gl renderer or lighting pass is nil")
+	}
+	return gr.lightingPass.queueDirectionalLight(direction, color, intensity, offset, softness, middayBlend)
 }
 
 // 清空当前帧的默认帧缓冲

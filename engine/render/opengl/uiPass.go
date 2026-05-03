@@ -117,6 +117,10 @@ func (p *uiPass) init() error {
 	p.textureLocation = p.shader.uniformLocation("uTexture")
 	p.useTextureLocation = p.shader.uniformLocation("uUseTexture")
 
+	if p.viewProjLocation < 0 || p.textureLocation < 0 || p.useTextureLocation < 0 {
+		return errors.New("ui pass uniform location is invalid")
+	}
+
 	batch, err := newSpriteBatch(p.glCtx, minSpriteBatchCapacity)
 	if err != nil {
 		return err

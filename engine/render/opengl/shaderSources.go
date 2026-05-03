@@ -8,6 +8,7 @@ type shaderID string
 // 内置 shader 关键字
 const (
 	shaderSceneSprite shaderID = "scene_sprite"
+	shaderLight       shaderID = "light"
 	shaderComposite   shaderID = "composite"
 	shaderUI          shaderID = "ui"
 )
@@ -25,6 +26,10 @@ var builtinShaderSources = map[shaderID]shaderSource{
 	shaderSceneSprite: {
 		vertex:   sceneSpriteVertexShaderSource,
 		fragment: sceneSpriteFragmentShaderSource,
+	},
+	shaderLight: {
+		vertex:   lightVertexShaderSource,
+		fragment: lightFragmentShaderSource,
 	},
 	shaderComposite: {
 		vertex:   compositeVertexShaderSource,
@@ -75,6 +80,163 @@ void main() {
 }
 `
 
+// 光照 pass 顶点着色器源码
+const lightVertexShaderSource = `
+#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aUV;
+
+uniform mat4 uViewProj;
+
+out vec2 vUV;
+
+void main() {
+	vUV = aUV;
+	gl_Position = uViewProj * vec4(aPos, 0.0, 1.0);
+}
+`
+
+// 光照 pass 片段着色器源码
+const lightFragmentShaderSource = `
+#version 330 core
+in vec2 vUV;
+
+// 灯光的颜色(RGB)
+uniform vec3 uLightColor;
+// 灯光的强度(亮度系数）
+uniform float uLightIntensity;
+// 灯光类型: 0点光源, 1聚光灯, 2平行光
+uniform int uLightType;
+// 聚光灯的朝向向量
+uniform vec2 uSpotDir;
+// 聚光灯内角余弦值(全亮区域边界)
+uniform float uSpotInnerCos;
+// 聚光灯外角余弦值(完全黑暗边界)
+uniform float uSpotOuterCos;
+// 正午混合因子, 0.0黄昏/黎明, 1.0正午
+uniform float uMiddayBlend;
+// 投影轴方向，沿该方向的投影值越大，遮罩越接近1，越亮
+uniform vec2 uDir2D;
+// 方向光明暗分界线的位置
+uniform float uDirOffset;
+// 方向光明暗过渡宽度。越大，明暗变化越柔
+uniform float uDirSoftness;
+
+out vec4 FragColor;
+
+// 点光/聚光的径向衰减遮罩
+// 潜在约定, 每个光源在自己的局部quad中心
+// 返回值 - 是一个[0, 1]的亮度衰减, 1表示最亮(无衰减, 中心), 0表示完全衰减(边缘/外部)
+// uv - 当前像素的 UV 坐标
+float computeAttenuation(vec2 uv) {
+	// 把UV坐标改成以中心为原点
+	vec2 d = uv - vec2(0.5);
+	// 向量长度*2.0
+	// 在[0, 1]的UV方块里, 从中心到上下左右边缘的距离是0.5, 不是1.0
+	// *2的目的是, 把UV中心到边缘的最大轴向距离0.5, 放大成半径距离1.0
+	float dist = length(d) * 2.0;
+	// a是一个线性衰减, 越靠中心越亮, 越靠边缘越暗 
+	float a = clamp(1.0 - dist, 0.0, 1.0);
+	// 把线性衰减平方一下。这样会让边缘衰减更快，光斑更集中
+	return a * a;
+}
+
+// 聚光灯的角度遮罩
+// 返回值 - 是一个[0, 1]的亮度遮罩, 1.0在聚光灯中心方向内, 完全照亮, 0.0在聚光灯外，完全不照, (0, 1)在边缘过渡区，柔和衰减
+// uv - 当前像素的 UV 坐标
+// spotDir - 聚光灯朝向
+// innerCos - 内角余弦，完全亮区域边界
+// outerCos - 外角余弦，完全暗区域边界
+float computeSpotMask(vec2 uv, vec2 spotDir, float innerCos, float outerCos) {
+	// 把UV坐标改成以中心为原点
+	vec2 d = uv - vec2(0.5);
+	vec2 dir = normalize(spotDir);
+	// 如果距离太近, 就不计算了, 直接假定这个点的方向和聚光灯朝向一致, 避免除0错误
+	vec2 l = (length(d) > 1e-5) ? normalize(d) : dir;
+	// 计算当前像素方向l和聚光灯朝向dir的夹角余弦值
+	float cd = dot(l, dir);
+	// 如果两者很接近, 下面的smoothstep会出现除0错误
+	if (abs(outerCos - innerCos) < 1e-5) {
+		return 1.0;
+	}
+	// 把cd映射成渐变遮罩, 聚光灯外0, 聚光灯内1, 中间边缘柔和过渡
+	// cd <= outerCos  -> 0.0, 聚光灯外
+  	// cd >= innerCos  -> 1.0, 聚光灯内圈
+	// 中间             -> (0, 1), 边缘柔和过渡
+	return smoothstep(outerCos, innerCos, cd);
+}
+
+// 方向光的渐变遮罩，比如太阳光从左上照来，屏幕某一侧亮，另一侧暗，中间有一段柔和过渡
+// 返回值 - 是一个[0, 1]的亮度遮罩, 0这块没有方向光, 1这块有方向光, 中间值过渡区域
+// uv - 当前像素的 UV 坐标
+// dir2d - 投影轴方向, 沿该方向的投影值越大, 遮罩越接近1, 越亮
+//         注意：它不是物理平行光的“照射方向”，而是屏幕空间明暗渐变的方向。
+// offset - 明暗分界线的位置
+// softness - 明暗过渡宽度。越大，明暗变化越柔
+// middayBlend - 中午混合值。越接近1, 越接近全屏均匀亮, 不再有明显方向渐变。
+float computeDirectionalMask(vec2 uv, vec2 dir2d, float offset, float softness, float middayBlend) {
+	vec2 nd = normalize(dir2d);
+	// uv-vec2(0.5) - UV 坐标系的原点从左下角(0,0)移动到中心(0.5, 0.5)​，就可以区分出光线同侧/背侧(正/负)
+	// t - 当前像素在方向光轴线上的位置, 尽量映射到[0, 1]附近, 左侧接近0, 中心接近0.5, 右侧接近1
+	float t = dot(nd, uv - vec2(0.5)) + 0.5;
+	// 比如, offset=0.5, softness=0.1, edge0=0.4, edge1=0.6
+	// 从t=0.4开始进入过渡, 到t=0.6结束过渡
+	// t<0.4, 基本是暗
+	// t=[0.4, 0.6], 平滑变亮
+	// t>0.6, 基本是亮
+	float edge0 = clamp(offset - softness, 0.0, 1.0);
+	float edge1 = clamp(offset + softness, 0.0, 1.0);
+	// 把方向轴上的位置t映射成亮度遮罩, 暗侧为0, 亮侧为1, 中间平滑过渡
+	// smoothstep(a, b, x), x<=a返回0, x>=b返回1, 中间返回(0, 1)之间的平滑曲线
+	float ramp = smoothstep(edge0, edge1, t);
+	// 根据“正午混合值”来决定是否要“消除”掉之前计算出的方向性阴影
+	// mix(a, b, x), 线性插值, 在a和b之间, 按比例x取一个值
+	return mix(ramp, 1.0, clamp(middayBlend, 0.0, 1.0));
+}
+
+void main() {
+	vec3 rgb;
+	if (uLightType == 2) {
+		// 方向光(平行光)
+		// 计算方向光的渐变遮罩
+		float dirMask = computeDirectionalMask(vUV, uDir2D, uDirOffset, uDirSoftness, uMiddayBlend);
+		// 最终光照颜色 = 光的颜色 * 光强 * 当前像素的方向遮罩
+		rgb = uLightColor * (uLightIntensity * dirMask);
+	} else if (uLightType == 1) {
+		// 聚光灯
+		// 计算聚光灯的径向衰减遮罩
+		float attenuation = computeAttenuation(vUV);
+		// 计算聚光灯的角度遮罩
+		//         L
+        //        /|\
+        //       / | \
+        //      /  |  \
+        //     /   A   \
+        //    /    |    \
+        //   /     |     \
+        //  /      |      \
+        // /       B       \
+		// 如果是上方情况, 则spotMask都是1.0, 需要径向衰减遮罩来区分不同距离的像素
+		float spotMask = computeSpotMask(vUV, uSpotDir, uSpotInnerCos, uSpotOuterCos);
+		// 加上 computeAttenuation 后才会变成：
+		// L
+		// |
+		// A   很亮
+		// |
+		// |
+		// B   很暗
+		rgb = uLightColor * (uLightIntensity * attenuation * spotMask);
+	} else {
+	 	// 点光源
+		// 计算点光源的径向衰减遮罩
+		float attenuation = computeAttenuation(vUV);
+		// 当前像素的点光颜色 = 光源颜色 * 光源强度 * 距离衰减
+		rgb = uLightColor * (uLightIntensity * attenuation);
+	}
+	FragColor = vec4(rgb, 1.0);
+}
+`
+
 // 合成 pass 顶点着色器源码
 const compositeVertexShaderSource = `
 #version 330 core
@@ -102,15 +264,15 @@ in vec4 vColor;
 
 uniform sampler2D uSceneColor;
 uniform sampler2D uLightColor;
+uniform vec3 uAmbient;
 
 out vec4 FragColor;
 
 void main() {
-	// vColor 没实际意义，因为 CompositePass 复用了 SpriteBatch，所以 shader 还带着 vColor。但实际传入永远是白色
+	// vColor没实际意义, 因为CompositePass复用了SpriteBatch, 所以shader还带着vColor。但实际传入永远是白色
 	vec4 sceneColor = texture(uSceneColor, vUV) * vColor;
-	// light 里暂时放的是环境光，只是把 light texture 清成环境光颜色。所以 composite 目前只能做“全屏变暗/变亮”，还不能做真正的点光/方向光效果
-	vec4 lightColor = texture(uLightColor, vUV);
-	FragColor = vec4(sceneColor.rgb * lightColor.rgb, sceneColor.a);
+	vec3 lightColor = texture(uLightColor, vUV).rgb + uAmbient;
+	FragColor = vec4(sceneColor.rgb * clamp(lightColor, 0.0, 1.0), sceneColor.a);
 }
 `
 
