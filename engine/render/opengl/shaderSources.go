@@ -115,7 +115,7 @@ uniform float uSpotInnerCos;
 uniform float uSpotOuterCos;
 // 正午混合因子, 0.0黄昏/黎明, 1.0正午
 uniform float uMiddayBlend;
-// 投影轴方向，沿该方向的投影值越大，遮罩越接近1，越亮
+// 投影轴方向, 沿该方向的投影值越大, 遮罩越接近1, 越亮
 uniform vec2 uDir2D;
 // 方向光明暗分界线的位置
 uniform float uDirOffset;

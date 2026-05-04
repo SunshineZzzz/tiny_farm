@@ -153,6 +153,36 @@ func (a *GameApp) render() {
 			slog.Error("draw demo ui texture failed", slog.Any("err", err))
 		}
 	}
+
+	// 临时黄昏方向光参数，用于验证屏幕空间明暗渐变效果
+	// 方向让光从左上铺入画面，暖橙色负责黄昏色调，少量 MiddayBlend 避免无环境光时暗部完全死黑
+	a.renderer.AddDirectionalLight(mgl32.Vec2{-0.7, -1.0}, &render.DirectionalLightOptions{
+		Color:       mgl32.Vec4{1.0, 0.56, 0.30, 1.0},
+		Intensity:   0.9,
+		Offset:      0.20,
+		Softness:    0.44,
+		MiddayBlend: 0.08,
+	})
+	// 点光源测试矩形，配合点光源检查光源中心和半径覆盖范围
+	a.renderer.DrawWorldRect(mgl32.Vec4{266.0, 134.0, 36.0, 36.0}, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+	// 临时点光源参数，对准右下角测试矩形中心，radius 接近矩形半对角线，用于验证 position 和 radius 是否生效
+	a.renderer.AddWorldPointLight(mgl32.Vec2{284.0, 152.0}, 18.0, &render.PointLightOptions{
+		Color:     mgl32.Vec4{1.0, 0.72, 0.34, 1.0},
+		Intensity: 1.0,
+	})
+	// 聚光灯测试矩形，配合聚光灯检查光源中心和半径覆盖范围
+	a.renderer.DrawWorldRect(
+		mgl32.Vec4{82.0, 72.0, 64.0, 64.0},
+		mgl32.Vec4{1.0, 1.0, 1.0, 1.0},
+	)
+	// 临时聚光灯参数，中心对准测试矩形中心，方向水平向右
+	a.renderer.AddWorldSpotLight(mgl32.Vec2{114.0, 104.0}, 32.0, mgl32.Vec2{1.0, 0.0}, &render.SpotLightOptions{
+		Color:         mgl32.Vec4{1.0, 0.82, 0.48, 1.0},
+		Intensity:     0.75,
+		InnerAngleDeg: 16.0,
+		OuterAngleDeg: 34.0,
+	})
+
 	a.renderer.Present()
 }
 
@@ -319,7 +349,9 @@ func (a *GameApp) initGLRenderer() error {
 	a.renderer.SetVSyncEnabled(a.config.Graphics.Vsync)
 	a.renderer.SetViewportClippingEnabled(true)
 	a.renderer.SetPixelSnapEnabled(true)
-	a.renderer.SetAmbientLightColor(mgl32.Vec4{0.0, 0.0, 0.0, 1.0})
+	// a.renderer.SetAmbientLightColor(mgl32.Vec4{0.0, 0.0, 0.0, 1.0})
+	// 低亮度暖灰环境光，适合作为黄昏默认底光，只抬暗部，不明显改变整体色调
+	a.renderer.SetAmbientLightColor(mgl32.Vec4{0.10, 0.085, 0.075, 1.0})
 	a.camera = render.NewCamera(logicalSize)
 	// 当前阶段还没有地图中心、出生点或跟随目标来决定初始视角
 	// 先把相机中心放到逻辑画布中心附近，使默认可视区域从世界原点附近开始
