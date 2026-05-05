@@ -295,6 +295,19 @@ func (p *lightingPass) queueDirectionalLight(direction mgl32.Vec2, color mgl32.V
 	return nil
 }
 
+// 清空光照离屏缓冲
+func (p *lightingPass) clear() {
+	if p == nil || p.glCtx == nil || p.framebuffer == 0 {
+		return
+	}
+
+	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, p.framebuffer)
+	p.glCtx.Viewport(0, 0, int32(p.size.X()), int32(p.size.Y()))
+	// 没有任何额外光照
+	p.glCtx.ClearColor(0.0, 0.0, 0.0, 1.0)
+	p.glCtx.Clear(gl.COLOR_BUFFER_BIT)
+}
+
 // 将本帧光源累积到 light color
 func (p *lightingPass) render() error {
 	if p == nil || p.glCtx == nil || p.framebuffer == 0 {
@@ -306,17 +319,13 @@ func (p *lightingPass) render() error {
 		return nil
 	}
 
-	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, p.framebuffer)
-	p.glCtx.Viewport(0, 0, int32(p.size.X()), int32(p.size.Y()))
-	// 没有任何额外光照
-	p.glCtx.ClearColor(0.0, 0.0, 0.0, 1.0)
-	p.glCtx.Clear(gl.COLOR_BUFFER_BIT)
-
 	if len(p.commands) == 0 {
 		p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
 		return nil
 	}
 
+	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, p.framebuffer)
+	p.glCtx.Viewport(0, 0, int32(p.size.X()), int32(p.size.Y()))
 	p.shader.use()
 	p.glCtx.BindVertexArray(p.vao)
 	p.glCtx.BindBuffer(gl.ARRAY_BUFFER, p.vbo)

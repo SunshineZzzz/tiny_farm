@@ -227,6 +227,9 @@ func (gr *GLRenderer) Clear() {
 	if gr.scenePass != nil {
 		gr.scenePass.clear(gr.clearColor)
 	}
+	if gr.lightingPass != nil {
+		gr.lightingPass.clear()
+	}
 	if gr.emissivePass != nil {
 		gr.emissivePass.clear()
 	}
