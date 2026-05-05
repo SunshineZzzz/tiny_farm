@@ -11,8 +11,7 @@ import (
 
 // 管理最终合成输出
 //
-// 当前阶段只把 ScenePass 输出的 scene color 贴回默认帧缓冲
-// 后续 Lighting、Emissive、Bloom 都从这里扩展输入纹理
+// 当前阶段合成 scene、lighting 和 emissive，Bloom 后续继续从这里扩展输入纹理
 type compositePass struct {
 	// 当前线程 OpenGL 函数调用入口
 	glCtx gl.Context
@@ -22,6 +21,8 @@ type compositePass struct {
 	batch *spriteBatch
 	// 光照输入缺省白纹理，表示全亮
 	defaultLightTexture *Texture
+	// 自发光输入缺省黑纹理，表示没有自发光贡献
+	defaultEmissiveTexture *Texture
 	// 环境光颜色，RGB 表示基础亮度
 	ambientColor mgl32.Vec4
 	// 视图投影 uniform 位置
@@ -30,18 +31,22 @@ type compositePass struct {
 	sceneTextureLocation int32
 	// 光照纹理采样器 uniform 位置
 	lightTextureLocation int32
+	// 自发光纹理采样器 uniform 位置
+	emissiveTextureLocation int32
 	// 环境光 uniform 位置
 	ambientLocation int32
 }
 
 // 合成输入纹理集合
 //
-// 当前只要求 sceneColor，其他 pass 输出会在后续阶段接入
+// sceneColor 是必需输入，lightColor 和 emissiveColor 有默认纹理兜底
 type compositePassInput struct {
 	// ScenePass 输出的颜色纹理
 	sceneColor *Texture
 	// LightingPass 输出的光照纹理，为 nil 时使用全亮白纹理
 	lightColor *Texture
+	// EmissivePass 输出的自发光纹理，为 nil 时使用全黑纹理
+	emissiveColor *Texture
 }
 
 // 创建最终合成 pass
@@ -87,6 +92,14 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 		return errors.New("composite light texture is nil")
 	}
 
+	emissiveColor := input.emissiveColor
+	if emissiveColor == nil {
+		emissiveColor = p.defaultEmissiveTexture
+	}
+	if emissiveColor == nil || emissiveColor.id == 0 {
+		return errors.New("composite emissive texture is nil")
+	}
+
 	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
 	p.glCtx.Viewport(
 		int32(viewport.Position.X()),
@@ -107,10 +120,12 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 	p.shader.use()
 	viewProj := mgl32.Ortho(0, viewport.Size.X(), viewport.Size.Y(), 0, -1, 1)
 	p.glCtx.UniformMatrix4fv(p.viewProjLocation, viewProj[:])
-	// 第1号纹理单元
+	// 第1, 2号纹理单元
 	const lightTextureUnit = gl.TEXTURE0 + 1
-	// shader uLightColor使用纹理单元 1
+	const emissiveTextureUnit = gl.TEXTURE0 + 2
+	// uLightColor使用纹理单元1, uEmissiveColor使用纹理单元2
 	p.glCtx.Uniform1i(p.lightTextureLocation, 1)
+	p.glCtx.Uniform1i(p.emissiveTextureLocation, 2)
 	p.glCtx.Uniform3fv(p.ambientLocation, []float32{
 		p.ambientColor.X(),
 		p.ambientColor.Y(),
@@ -120,12 +135,20 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 	p.glCtx.ActiveTexture(lightTextureUnit)
 	// 绑定光照纹理到纹理单元1
 	p.glCtx.BindTexture(gl.TEXTURE_2D, lightColor.id)
+	// 激活纹理单元2
+	p.glCtx.ActiveTexture(emissiveTextureUnit)
+	// 绑定自发光纹理到纹理单元2
+	p.glCtx.BindTexture(gl.TEXTURE_2D, emissiveColor.id)
 
 	// 收尾清理
 	defer func() {
 		// 切回GL_TEXTURE1
 		p.glCtx.ActiveTexture(lightTextureUnit)
 		// 把GL_TEXTURE1上绑定的light texture解绑
+		p.glCtx.BindTexture(gl.TEXTURE_2D, 0)
+		// 切回GL_TEXTURE2
+		p.glCtx.ActiveTexture(emissiveTextureUnit)
+		// 把GL_TEXTURE2上绑定的emissive texture解绑
 		p.glCtx.BindTexture(gl.TEXTURE_2D, 0)
 		// 再把当前活动纹理单元恢复到GL_TEXTURE0
 		p.glCtx.ActiveTexture(gl.TEXTURE0)
@@ -161,10 +184,15 @@ func (p *compositePass) clean() {
 		p.defaultLightTexture.Close()
 		p.defaultLightTexture = nil
 	}
+	if p.defaultEmissiveTexture != nil {
+		p.defaultEmissiveTexture.Close()
+		p.defaultEmissiveTexture = nil
+	}
 	p.shader = nil
 	p.viewProjLocation = -1
 	p.sceneTextureLocation = -1
 	p.lightTextureLocation = -1
+	p.emissiveTextureLocation = -1
 	p.ambientLocation = -1
 }
 
@@ -173,10 +201,12 @@ func (p *compositePass) init() error {
 	p.viewProjLocation = p.shader.uniformLocation("uViewProj")
 	p.sceneTextureLocation = p.shader.uniformLocation("uSceneColor")
 	p.lightTextureLocation = p.shader.uniformLocation("uLightColor")
+	p.emissiveTextureLocation = p.shader.uniformLocation("uEmissiveColor")
 	p.ambientLocation = p.shader.uniformLocation("uAmbient")
 
 	if p.viewProjLocation < 0 || p.sceneTextureLocation < 0 ||
-		p.lightTextureLocation < 0 || p.ambientLocation < 0 {
+		p.lightTextureLocation < 0 || p.emissiveTextureLocation < 0 ||
+		p.ambientLocation < 0 {
 		return errors.New("composite pass uniform location is invalid")
 	}
 
@@ -191,6 +221,12 @@ func (p *compositePass) init() error {
 		return err
 	}
 	p.defaultLightTexture = defaultLightTexture
+
+	defaultEmissiveTexture, err := newSolidTexture(p.glCtx, [4]byte{0, 0, 0, 255}, "composite-default-emissive")
+	if err != nil {
+		return err
+	}
+	p.defaultEmissiveTexture = defaultEmissiveTexture
 
 	return nil
 }

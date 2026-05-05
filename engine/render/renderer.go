@@ -292,6 +292,78 @@ func (r *Renderer) DrawWorldTextureSourceRect(texture *Texture, dstRect mgl32.Ve
 	return r.backend.DrawTextureSourceRect(texture.backend, logicalRect, srcRect)
 }
 
+// 绘制逻辑坐标系下的自发光纯色矩形
+func (r *Renderer) DrawEmissiveRect(rect mgl32.Vec4, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	return r.backend.DrawEmissiveRect(rect, color)
+}
+
+// 绘制世界坐标系下的自发光纯色矩形
+func (r *Renderer) DrawWorldEmissiveRect(rect mgl32.Vec4, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	logicalRect, ok := r.worldRectToLogical(rect)
+	if !ok {
+		return nil
+	}
+	return r.backend.DrawEmissiveRect(logicalRect, color)
+}
+
+// 绘制逻辑坐标系下的自发光贴图矩形
+func (r *Renderer) DrawEmissiveTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	return r.backend.DrawEmissiveTexture(texture.backend, dstRect, uvRect, color)
+}
+
+// 绘制世界坐标系下的自发光贴图矩形
+func (r *Renderer) DrawWorldEmissiveTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	logicalRect, ok := r.worldRectToLogical(dstRect)
+	if !ok {
+		return nil
+	}
+	return r.backend.DrawEmissiveTexture(texture.backend, logicalRect, uvRect, color)
+}
+
+// 绘制逻辑坐标系下的自发光贴图源矩形
+func (r *Renderer) DrawEmissiveTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	return r.backend.DrawEmissiveTextureSourceRect(texture.backend, dstRect, srcRect, color)
+}
+
+// 绘制世界坐标系下的自发光贴图源矩形
+func (r *Renderer) DrawWorldEmissiveTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	logicalRect, ok := r.worldRectToLogical(dstRect)
+	if !ok {
+		return nil
+	}
+	return r.backend.DrawEmissiveTextureSourceRect(texture.backend, logicalRect, srcRect, color)
+}
+
 // 加载纹理
 func (r *Renderer) LoadTexture(path string) (*Texture, error) {
 	if r == nil || r.backend == nil {

@@ -182,6 +182,10 @@ func (a *GameApp) render() {
 		InnerAngleDeg: 16.0,
 		OuterAngleDeg: 34.0,
 	})
+	// 临时自发光矩形，独立于光照乘法合成，用于验证 EmissivePass 和 CompositePass 输入
+	if err := a.renderer.DrawWorldEmissiveRect(mgl32.Vec4{232.0, 132.0, 24.0, 16.0}, mgl32.Vec4{0.0, 0.75, 1.0, 1.0}); err != nil {
+		slog.Error("draw demo emissive rect failed", slog.Any("err", err))
+	}
 
 	a.renderer.Present()
 }

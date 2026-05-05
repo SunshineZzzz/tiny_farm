@@ -24,6 +24,8 @@ type GLRenderer struct {
 	scenePass *scenePass
 	// 世界光照离屏渲染目标
 	lightingPass *lightingPass
+	// 世界自发光离屏渲染目标
+	emissivePass *emissivePass
 	// 默认帧缓冲合成输出
 	compositePass *compositePass
 	// 默认帧缓冲 UI 输出
@@ -85,6 +87,16 @@ func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJso
 		return err
 	}
 	gr.lightingPass = lightingPass
+
+	emissiveShader, err := gr.shaderLibrary.get(shaderEmissive)
+	if err != nil {
+		return err
+	}
+	emissivePass, err := newEmissivePass(rc.glContext, logicalSize, emissiveShader)
+	if err != nil {
+		return err
+	}
+	gr.emissivePass = emissivePass
 
 	compositeShader, err := gr.shaderLibrary.get(shaderComposite)
 	if err != nil {
@@ -215,6 +227,9 @@ func (gr *GLRenderer) Clear() {
 	if gr.scenePass != nil {
 		gr.scenePass.clear(gr.clearColor)
 	}
+	if gr.emissivePass != nil {
+		gr.emissivePass.clear()
+	}
 }
 
 // 绘制一个逻辑坐标系下的纯色矩形
@@ -253,6 +268,40 @@ func (gr *GLRenderer) DrawTextureSourceRect(texture *Texture, dstRect mgl32.Vec4
 		return err
 	}
 	return gr.DrawTexture(texture, dstRect, uvRect)
+}
+
+// 绘制一个逻辑坐标系下的自发光纯色矩形
+func (gr *GLRenderer) DrawEmissiveRect(rect mgl32.Vec4, color mgl32.Vec4) error {
+	if gr == nil || gr.emissivePass == nil {
+		return errors.New("gl renderer or emissive pass is nil")
+	}
+	if rect.Z() <= 0 || rect.W() <= 0 {
+		return errors.New("emissive rect width or height is invalid")
+	}
+	return gr.emissivePass.queueRect(rect, color)
+}
+
+// 绘制一个逻辑坐标系下的自发光贴图矩形
+func (gr *GLRenderer) DrawEmissiveTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+	if gr == nil || gr.emissivePass == nil {
+		return errors.New("gl renderer or emissive pass is nil")
+	}
+	if texture == nil || texture.id == 0 {
+		return errors.New("texture is nil")
+	}
+	if dstRect.Z() <= 0 || dstRect.W() <= 0 {
+		return errors.New("emissive dst rect width or height is invalid")
+	}
+	return gr.emissivePass.queueTexture(texture, dstRect, uvRect, color)
+}
+
+// 绘制一个逻辑坐标系下的自发光贴图源矩形
+func (gr *GLRenderer) DrawEmissiveTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4) error {
+	uvRect, err := textureSourceRectUV(texture, srcRect)
+	if err != nil {
+		return err
+	}
+	return gr.DrawEmissiveTexture(texture, dstRect, uvRect, color)
 }
 
 // 绘制一个 UI 逻辑坐标系下的纯色矩形
@@ -307,6 +356,9 @@ func (gr *GLRenderer) Present() error {
 	if err := gr.flushLightingPass(); err != nil {
 		return err
 	}
+	if err := gr.flushEmissivePass(); err != nil {
+		return err
+	}
 	if err := gr.flushCompositePass(); err != nil {
 		return err
 	}
@@ -340,6 +392,10 @@ func (gr *GLRenderer) Close() {
 	if gr.lightingPass != nil {
 		gr.lightingPass.clean()
 		gr.lightingPass = nil
+	}
+	if gr.emissivePass != nil {
+		gr.emissivePass.clean()
+		gr.emissivePass = nil
 	}
 	if gr.compositePass != nil {
 		gr.compositePass.clean()
@@ -384,6 +440,15 @@ func (gr *GLRenderer) flushLightingPass() error {
 	return gr.lightingPass.render()
 }
 
+// 提交世界自发光到 logical size FBO
+func (gr *GLRenderer) flushEmissivePass() error {
+	if gr == nil || gr.emissivePass == nil {
+		return nil
+	}
+
+	return gr.emissivePass.render()
+}
+
 // 将场景 FBO 输出交给最终合成 pass
 func (gr *GLRenderer) flushCompositePass() error {
 	if gr == nil || gr.scenePass == nil || gr.scenePass.texture() == nil || gr.compositePass == nil || gr.viewportManager == nil {
@@ -396,8 +461,9 @@ func (gr *GLRenderer) flushCompositePass() error {
 	}
 
 	return gr.compositePass.render(gr.viewportManager.viewport, compositePassInput{
-		sceneColor: gr.scenePass.texture(),
-		lightColor: gr.lightingTexture(),
+		sceneColor:    gr.scenePass.texture(),
+		lightColor:    gr.lightingTexture(),
+		emissiveColor: gr.emissiveTexture(),
 	})
 }
 
@@ -406,6 +472,13 @@ func (gr *GLRenderer) lightingTexture() *Texture {
 		return nil
 	}
 	return gr.lightingPass.texture()
+}
+
+func (gr *GLRenderer) emissiveTexture() *Texture {
+	if gr == nil || gr.emissivePass == nil {
+		return nil
+	}
+	return gr.emissivePass.texture()
 }
 
 // 将 UI 批处理输出到默认 framebuffer 的 letterbox viewport

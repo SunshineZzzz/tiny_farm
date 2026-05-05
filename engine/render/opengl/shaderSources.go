@@ -9,6 +9,7 @@ type shaderID string
 const (
 	shaderSceneSprite shaderID = "scene_sprite"
 	shaderLight       shaderID = "light"
+	shaderEmissive    shaderID = "emissive"
 	shaderComposite   shaderID = "composite"
 	shaderUI          shaderID = "ui"
 )
@@ -30,6 +31,10 @@ var builtinShaderSources = map[shaderID]shaderSource{
 	shaderLight: {
 		vertex:   lightVertexShaderSource,
 		fragment: lightFragmentShaderSource,
+	},
+	shaderEmissive: {
+		vertex:   emissiveVertexShaderSource,
+		fragment: emissiveFragmentShaderSource,
 	},
 	shaderComposite: {
 		vertex:   compositeVertexShaderSource,
@@ -237,6 +242,45 @@ void main() {
 }
 `
 
+// 自发光 pass 顶点着色器源码
+const emissiveVertexShaderSource = `
+#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aUV;
+layout(location = 2) in vec4 aColor;
+
+uniform mat4 uViewProj;
+
+out vec2 vUV;
+out vec4 vColor;
+
+void main() {
+	vUV = aUV;
+	vColor = aColor;
+	gl_Position = uViewProj * vec4(aPos, 0.0, 1.0);
+}
+`
+
+// 自发光 pass 片段着色器源码
+const emissiveFragmentShaderSource = `
+#version 330 core
+in vec2 vUV;
+in vec4 vColor;
+
+uniform sampler2D uTexture;
+uniform bool uUseTexture;
+
+out vec4 FragColor;
+
+void main() {
+	vec4 color = vColor;
+	if (uUseTexture) {
+		color *= texture(uTexture, vUV);
+	}
+	FragColor = color;
+}
+`
+
 // 合成 pass 顶点着色器源码
 const compositeVertexShaderSource = `
 #version 330 core
@@ -264,6 +308,7 @@ in vec4 vColor;
 
 uniform sampler2D uSceneColor;
 uniform sampler2D uLightColor;
+uniform sampler2D uEmissiveColor;
 uniform vec3 uAmbient;
 
 out vec4 FragColor;
@@ -272,7 +317,13 @@ void main() {
 	// vColor没实际意义, 因为CompositePass复用了SpriteBatch, 所以shader还带着vColor。但实际传入永远是白色
 	vec4 sceneColor = texture(uSceneColor, vUV) * vColor;
 	vec3 lightColor = texture(uLightColor, vUV).rgb + uAmbient;
-	FragColor = vec4(sceneColor.rgb * clamp(lightColor, 0.0, 1.0), sceneColor.a);
+	vec3 emissiveColor = texture(uEmissiveColor, vUV).rgb;
+	// 最终颜色 = 物体颜色 * 光照强度 + 自发光颜色
+	// * 是调制/缩放，+ 是叠加/增加。
+	// sceneColor.rgb * lightColor, 物体本身颜色受光照影响后的结果
+	// + emissiveColor, 自发光颜色额外加到最终颜色上
+	vec3 rgb = sceneColor.rgb * clamp(lightColor, 0.0, 1.0) + emissiveColor;
+	FragColor = vec4(clamp(rgb, 0.0, 1.0), sceneColor.a);
 }
 `
 
