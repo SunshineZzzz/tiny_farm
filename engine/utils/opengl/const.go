@@ -53,6 +53,7 @@ const (
 	MAX_TEXTURE_SIZE      = 0x0D33
 	MIN                   = 0x8007
 	NEAREST               = 0x2600
+	LINEAR                = 0x2601
 	NO_ERROR              = 0
 	NOTEQUAL              = 0x0205
 	ONE                   = 1

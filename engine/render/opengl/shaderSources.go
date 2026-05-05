@@ -10,6 +10,7 @@ const (
 	shaderSceneSprite shaderID = "scene_sprite"
 	shaderLight       shaderID = "light"
 	shaderEmissive    shaderID = "emissive"
+	shaderBloom       shaderID = "bloom"
 	shaderComposite   shaderID = "composite"
 	shaderUI          shaderID = "ui"
 )
@@ -35,6 +36,10 @@ var builtinShaderSources = map[shaderID]shaderSource{
 	shaderEmissive: {
 		vertex:   emissiveVertexShaderSource,
 		fragment: emissiveFragmentShaderSource,
+	},
+	shaderBloom: {
+		vertex:   bloomVertexShaderSource,
+		fragment: bloomFragmentShaderSource,
 	},
 	shaderComposite: {
 		vertex:   compositeVertexShaderSource,
@@ -281,6 +286,67 @@ void main() {
 }
 `
 
+// Bloom pass 顶点着色器源码
+const bloomVertexShaderSource = `
+#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aUV;
+layout(location = 2) in vec4 aColor;
+
+uniform mat4 uViewProj;
+
+out vec2 vUV;
+out vec4 vColor;
+
+void main() {
+	vUV = aUV;
+	vColor = aColor;
+	gl_Position = uViewProj * vec4(aPos, 0.0, 1.0);
+}
+`
+
+// Bloom pass 片段着色器源码
+const bloomFragmentShaderSource = `
+#version 330 core
+in vec2 vUV;
+in vec4 vColor;
+
+// 要模糊的纹理
+uniform sampler2D uTexture;
+// 单个纹理像素在UV空间的大小,
+// 假设纹理宽度=800px, 高度=600px
+// 则uTexelSize = vec2(1.0/800.0, 1.0/600.0)
+// 表示在UV空间移动一个像素所需的步长
+uniform vec2 uTexelSize;
+// 模糊的方向向量，决定模糊是水平、垂直还是斜向
+uniform vec2 uDirection;
+
+out vec4 FragColor;
+
+void main() {
+	// 在模糊方向上一个像素的偏移量
+	vec2 stepUV = uTexelSize * uDirection;
+	// [0.070270, 0.316216, 0.227027, 0.316216, 0.070270], 高斯模糊权重, 采样点数量5TAP
+	// 中心点, 权重22.7%, 当前像素距离0.0
+	vec3 color = texture(uTexture, vUV).rgb * 0.227027;
+	// 高斯模糊本来需要9TAP, 用更少的采样5TAP, 模拟9TAP的效果
+	// 因为高斯模糊要求第2个格子比第3个格子更重要(权重更高)。如果你看正中间(1.5), 
+	// 两个格子就一样清楚了。所以要稍微往第2个格子挪一点, 算法计算出1.384615
+	// texture(uTexture, uv), 代码层需要设置成线性采样, color ≈ (1 - t) * texel(1) + t * texel(2)
+	// 
+	// 模糊正方向第1、2格的等效采样点, 权重31.6216%
+	color += texture(uTexture, vUV + stepUV * 1.384615).rgb * 0.316216;
+	// 模糊负方向第1、2格的等效采样点, 权重31.6216%
+	color += texture(uTexture, vUV - stepUV * 1.384615).rgb * 0.316216;
+	// 模糊正方向第3、4格的等效采样点, 权重7.0270%
+	color += texture(uTexture, vUV + stepUV * 3.230769).rgb * 0.070270;
+	// 模糊负方向第3、4格的等效采样点, 权重7.0270%
+	color += texture(uTexture, vUV - stepUV * 3.230769).rgb * 0.070270;
+	// vColor没实际意义, 因为BloomPass复用了SpriteBatch, 所以shader还带着vColor。但实际传入永远是白色
+	FragColor = vec4(color * vColor.rgb, 1.0);
+}
+`
+
 // 合成 pass 顶点着色器源码
 const compositeVertexShaderSource = `
 #version 330 core
@@ -308,8 +374,11 @@ in vec4 vColor;
 
 uniform sampler2D uSceneColor;
 uniform sampler2D uLightColor;
-uniform sampler2D uEmissiveColor;
 uniform vec3 uAmbient;
+uniform sampler2D uEmissiveColor;
+uniform sampler2D uBloomColor;
+// 光晕强度
+uniform float uBloomStrength;
 
 out vec4 FragColor;
 
@@ -318,11 +387,13 @@ void main() {
 	vec4 sceneColor = texture(uSceneColor, vUV) * vColor;
 	vec3 lightColor = texture(uLightColor, vUV).rgb + uAmbient;
 	vec3 emissiveColor = texture(uEmissiveColor, vUV).rgb;
-	// 最终颜色 = 物体颜色 * 光照强度 + 自发光颜色
+	vec3 bloomColor = texture(uBloomColor, vUV).rgb * uBloomStrength;
+	// 最终颜色 = 物体颜色 * 光照强度 + 自发光颜色 + Bloom 颜色
 	// * 是调制/缩放，+ 是叠加/增加。
 	// sceneColor.rgb * lightColor, 物体本身颜色受光照影响后的结果
 	// + emissiveColor, 自发光颜色额外加到最终颜色上
-	vec3 rgb = sceneColor.rgb * clamp(lightColor, 0.0, 1.0) + emissiveColor;
+	// + bloomColor, 自发光模糊后的辉光额外加到最终颜色上
+	vec3 rgb = sceneColor.rgb * clamp(lightColor, 0.0, 1.0) + emissiveColor + bloomColor;
 	FragColor = vec4(clamp(rgb, 0.0, 1.0), sceneColor.a);
 }
 `

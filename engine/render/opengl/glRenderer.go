@@ -26,6 +26,8 @@ type GLRenderer struct {
 	lightingPass *lightingPass
 	// 世界自发光离屏渲染目标
 	emissivePass *emissivePass
+	// 世界自发光辉光后处理目标
+	bloomPass *bloomPass
 	// 默认帧缓冲合成输出
 	compositePass *compositePass
 	// 默认帧缓冲 UI 输出
@@ -98,6 +100,16 @@ func (gr *GLRenderer) init(window *sdl.Window, logicalSize mgl32.Vec2, paramsJso
 	}
 	gr.emissivePass = emissivePass
 
+	bloomShader, err := gr.shaderLibrary.get(shaderBloom)
+	if err != nil {
+		return err
+	}
+	bloomPass, err := newBloomPass(rc.glContext, logicalSize, bloomShader)
+	if err != nil {
+		return err
+	}
+	gr.bloomPass = bloomPass
+
 	compositeShader, err := gr.shaderLibrary.get(shaderComposite)
 	if err != nil {
 		return err
@@ -142,7 +154,7 @@ func (gr *GLRenderer) initViewportManager(rc *renderContext, logicalSize mgl32.V
 // 初始化当前阶段共用的临时混合状态
 //
 // 现在 ScenePass、CompositePass 和 UIPass 都沿用普通 alpha blend，先放在 GLRenderer 统一设置
-// 后续 Lighting、Emissive、Bloom 接入后，每个 pass 应该按自己的绘制语义显式设置 OpenGL 状态
+// Lighting、Emissive、Bloom 等 pass 按自己的绘制语义显式设置 OpenGL 状态
 func (gr *GLRenderer) initBlendState() {
 	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
 		return
@@ -185,6 +197,22 @@ func (gr *GLRenderer) SetLightingEnabled(enabled bool) {
 		return
 	}
 	gr.lightingPass.setEnabled(enabled)
+}
+
+// 设置是否启用自发光 Bloom 后处理
+func (gr *GLRenderer) SetBloomEnabled(enabled bool) {
+	if gr == nil || gr.bloomPass == nil {
+		return
+	}
+	gr.bloomPass.setEnabled(enabled)
+}
+
+// 设置 Bloom 合成强度
+func (gr *GLRenderer) SetBloomStrength(strength float32) {
+	if gr == nil || gr.compositePass == nil {
+		return
+	}
+	gr.compositePass.setBloomStrength(strength)
 }
 
 // 提交 logical 坐标系下的点光源
@@ -232,6 +260,9 @@ func (gr *GLRenderer) Clear() {
 	}
 	if gr.emissivePass != nil {
 		gr.emissivePass.clear()
+	}
+	if gr.bloomPass != nil {
+		gr.bloomPass.clear()
 	}
 }
 
@@ -362,6 +393,9 @@ func (gr *GLRenderer) Present() error {
 	if err := gr.flushEmissivePass(); err != nil {
 		return err
 	}
+	if err := gr.flushBloomPass(); err != nil {
+		return err
+	}
 	if err := gr.flushCompositePass(); err != nil {
 		return err
 	}
@@ -399,6 +433,10 @@ func (gr *GLRenderer) Close() {
 	if gr.emissivePass != nil {
 		gr.emissivePass.clean()
 		gr.emissivePass = nil
+	}
+	if gr.bloomPass != nil {
+		gr.bloomPass.clean()
+		gr.bloomPass = nil
 	}
 	if gr.compositePass != nil {
 		gr.compositePass.clean()
@@ -452,6 +490,15 @@ func (gr *GLRenderer) flushEmissivePass() error {
 	return gr.emissivePass.render()
 }
 
+// 提交自发光纹理到 Bloom 后处理
+func (gr *GLRenderer) flushBloomPass() error {
+	if gr == nil || gr.bloomPass == nil {
+		return nil
+	}
+
+	return gr.bloomPass.render(gr.emissiveTexture())
+}
+
 // 将场景 FBO 输出交给最终合成 pass
 func (gr *GLRenderer) flushCompositePass() error {
 	if gr == nil || gr.scenePass == nil || gr.scenePass.texture() == nil || gr.compositePass == nil || gr.viewportManager == nil {
@@ -467,6 +514,7 @@ func (gr *GLRenderer) flushCompositePass() error {
 		sceneColor:    gr.scenePass.texture(),
 		lightColor:    gr.lightingTexture(),
 		emissiveColor: gr.emissiveTexture(),
+		bloomColor:    gr.bloomTexture(),
 	})
 }
 
@@ -482,6 +530,13 @@ func (gr *GLRenderer) emissiveTexture() *Texture {
 		return nil
 	}
 	return gr.emissivePass.texture()
+}
+
+func (gr *GLRenderer) bloomTexture() *Texture {
+	if gr == nil || gr.bloomPass == nil {
+		return nil
+	}
+	return gr.bloomPass.texture()
 }
 
 // 将 UI 批处理输出到默认 framebuffer 的 letterbox viewport

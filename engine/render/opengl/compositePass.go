@@ -11,7 +11,7 @@ import (
 
 // 管理最终合成输出
 //
-// 当前阶段合成 scene、lighting 和 emissive，Bloom 后续继续从这里扩展输入纹理
+// 当前阶段合成 scene、lighting、emissive 和 bloom，后续继续从这里扩展输出控制
 type compositePass struct {
 	// 当前线程 OpenGL 函数调用入口
 	glCtx gl.Context
@@ -23,8 +23,12 @@ type compositePass struct {
 	defaultLightTexture *Texture
 	// 自发光输入缺省黑纹理，表示没有自发光贡献
 	defaultEmissiveTexture *Texture
+	// Bloom 输入缺省黑纹理，表示没有辉光贡献
+	defaultBloomTexture *Texture
 	// 环境光颜色，RGB 表示基础亮度
 	ambientColor mgl32.Vec4
+	// Bloom 合成强度
+	bloomStrength float32
 	// 视图投影 uniform 位置
 	viewProjLocation int32
 	// 场景纹理采样器 uniform 位置
@@ -33,8 +37,12 @@ type compositePass struct {
 	lightTextureLocation int32
 	// 自发光纹理采样器 uniform 位置
 	emissiveTextureLocation int32
+	// Bloom 纹理采样器 uniform 位置
+	bloomTextureLocation int32
 	// 环境光 uniform 位置
 	ambientLocation int32
+	// Bloom 强度 uniform 位置
+	bloomStrengthLocation int32
 }
 
 // 合成输入纹理集合
@@ -47,6 +55,8 @@ type compositePassInput struct {
 	lightColor *Texture
 	// EmissivePass 输出的自发光纹理，为 nil 时使用全黑纹理
 	emissiveColor *Texture
+	// BloomPass 输出的辉光纹理，为 nil 时使用全黑纹理
+	bloomColor *Texture
 }
 
 // 创建最终合成 pass
@@ -59,9 +69,10 @@ func newCompositePass(glCtx gl.Context, shader *shaderProgram) (*compositePass, 
 	}
 
 	pass := &compositePass{
-		glCtx:        glCtx,
-		shader:       shader,
-		ambientColor: mgl32.Vec4{1.0, 1.0, 1.0, 1.0},
+		glCtx:         glCtx,
+		shader:        shader,
+		ambientColor:  mgl32.Vec4{1.0, 1.0, 1.0, 1.0},
+		bloomStrength: 1.0,
 	}
 	if err := pass.init(); err != nil {
 		pass.clean()
@@ -100,6 +111,14 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 		return errors.New("composite emissive texture is nil")
 	}
 
+	bloomColor := input.bloomColor
+	if bloomColor == nil {
+		bloomColor = p.defaultBloomTexture
+	}
+	if bloomColor == nil || bloomColor.id == 0 {
+		return errors.New("composite bloom texture is nil")
+	}
+
 	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
 	p.glCtx.Viewport(
 		int32(viewport.Position.X()),
@@ -120,17 +139,20 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 	p.shader.use()
 	viewProj := mgl32.Ortho(0, viewport.Size.X(), viewport.Size.Y(), 0, -1, 1)
 	p.glCtx.UniformMatrix4fv(p.viewProjLocation, viewProj[:])
-	// 第1, 2号纹理单元
+	// 第1, 2, 3号纹理单元
 	const lightTextureUnit = gl.TEXTURE0 + 1
 	const emissiveTextureUnit = gl.TEXTURE0 + 2
-	// uLightColor使用纹理单元1, uEmissiveColor使用纹理单元2
+	const bloomTextureUnit = gl.TEXTURE0 + 3
+	// uLightColor使用纹理单元1, uEmissiveColor使用纹理单元2, uBloomColor使用纹理单元3
 	p.glCtx.Uniform1i(p.lightTextureLocation, 1)
 	p.glCtx.Uniform1i(p.emissiveTextureLocation, 2)
+	p.glCtx.Uniform1i(p.bloomTextureLocation, 3)
 	p.glCtx.Uniform3fv(p.ambientLocation, []float32{
 		p.ambientColor.X(),
 		p.ambientColor.Y(),
 		p.ambientColor.Z(),
 	})
+	p.glCtx.Uniform1fv(p.bloomStrengthLocation, []float32{p.bloomStrength})
 	// 激活纹理单元1
 	p.glCtx.ActiveTexture(lightTextureUnit)
 	// 绑定光照纹理到纹理单元1
@@ -139,6 +161,10 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 	p.glCtx.ActiveTexture(emissiveTextureUnit)
 	// 绑定自发光纹理到纹理单元2
 	p.glCtx.BindTexture(gl.TEXTURE_2D, emissiveColor.id)
+	// 激活纹理单元3
+	p.glCtx.ActiveTexture(bloomTextureUnit)
+	// 绑定 Bloom 纹理到纹理单元3
+	p.glCtx.BindTexture(gl.TEXTURE_2D, bloomColor.id)
 
 	// 收尾清理
 	defer func() {
@@ -149,6 +175,10 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 		// 切回GL_TEXTURE2
 		p.glCtx.ActiveTexture(emissiveTextureUnit)
 		// 把GL_TEXTURE2上绑定的emissive texture解绑
+		p.glCtx.BindTexture(gl.TEXTURE_2D, 0)
+		// 切回GL_TEXTURE3
+		p.glCtx.ActiveTexture(bloomTextureUnit)
+		// 把GL_TEXTURE3上绑定的bloom texture解绑
 		p.glCtx.BindTexture(gl.TEXTURE_2D, 0)
 		// 再把当前活动纹理单元恢复到GL_TEXTURE0
 		p.glCtx.ActiveTexture(gl.TEXTURE0)
@@ -170,6 +200,14 @@ func (p *compositePass) setAmbientColor(color mgl32.Vec4) {
 	p.ambientColor = mgl32.Vec4{color.X(), color.Y(), color.Z(), 1.0}
 }
 
+// 设置 Bloom 合成强度
+func (p *compositePass) setBloomStrength(strength float32) {
+	if p == nil {
+		return
+	}
+	p.bloomStrength = max(strength, 0.0)
+}
+
 // 释放合成 pass 的 OpenGL 资源
 func (p *compositePass) clean() {
 	if p == nil {
@@ -188,12 +226,18 @@ func (p *compositePass) clean() {
 		p.defaultEmissiveTexture.Close()
 		p.defaultEmissiveTexture = nil
 	}
+	if p.defaultBloomTexture != nil {
+		p.defaultBloomTexture.Close()
+		p.defaultBloomTexture = nil
+	}
 	p.shader = nil
 	p.viewProjLocation = -1
 	p.sceneTextureLocation = -1
 	p.lightTextureLocation = -1
 	p.emissiveTextureLocation = -1
+	p.bloomTextureLocation = -1
 	p.ambientLocation = -1
+	p.bloomStrengthLocation = -1
 }
 
 // 初始化合成 uniform 和批处理资源
@@ -201,12 +245,15 @@ func (p *compositePass) init() error {
 	p.viewProjLocation = p.shader.uniformLocation("uViewProj")
 	p.sceneTextureLocation = p.shader.uniformLocation("uSceneColor")
 	p.lightTextureLocation = p.shader.uniformLocation("uLightColor")
-	p.emissiveTextureLocation = p.shader.uniformLocation("uEmissiveColor")
 	p.ambientLocation = p.shader.uniformLocation("uAmbient")
+	p.emissiveTextureLocation = p.shader.uniformLocation("uEmissiveColor")
+	p.bloomTextureLocation = p.shader.uniformLocation("uBloomColor")
+	p.bloomStrengthLocation = p.shader.uniformLocation("uBloomStrength")
 
 	if p.viewProjLocation < 0 || p.sceneTextureLocation < 0 ||
-		p.lightTextureLocation < 0 || p.emissiveTextureLocation < 0 ||
-		p.ambientLocation < 0 {
+		p.lightTextureLocation < 0 || p.ambientLocation < 0 ||
+		p.emissiveTextureLocation < 0 || p.bloomTextureLocation < 0 ||
+		p.bloomStrengthLocation < 0 {
 		return errors.New("composite pass uniform location is invalid")
 	}
 
@@ -227,6 +274,12 @@ func (p *compositePass) init() error {
 		return err
 	}
 	p.defaultEmissiveTexture = defaultEmissiveTexture
+
+	defaultBloomTexture, err := newSolidTexture(p.glCtx, [4]byte{0, 0, 0, 255}, "composite-default-bloom")
+	if err != nil {
+		return err
+	}
+	p.defaultBloomTexture = defaultBloomTexture
 
 	return nil
 }

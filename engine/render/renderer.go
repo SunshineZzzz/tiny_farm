@@ -112,6 +112,22 @@ func (r *Renderer) SetLightingEnabled(enabled bool) {
 	r.backend.SetLightingEnabled(enabled)
 }
 
+// 设置是否启用世界自发光 Bloom 后处理
+func (r *Renderer) SetBloomEnabled(enabled bool) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetBloomEnabled(enabled)
+}
+
+// 设置世界自发光 Bloom 合成强度
+func (r *Renderer) SetBloomStrength(strength float32) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetBloomStrength(strength)
+}
+
 // 提交 logical 坐标系下的点光源
 func (r *Renderer) AddPointLight(position mgl32.Vec2, radius float32, options *PointLightOptions) error {
 	if r == nil || r.backend == nil {
