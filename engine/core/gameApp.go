@@ -208,6 +208,9 @@ func (a *GameApp) frameStats(deltaTime float64) {
 		slog.Float64("avgDeltaTime", avgDeltaTime),
 		slog.Float64("avgFps", avgFps),
 	)
+	if a.renderer != nil {
+		slog.Debug("render stats", slog.Any("stats", a.renderer.RenderStats()))
+	}
 
 	a.frameCount = 0
 	a.deltaTimeSum = 0.0
@@ -379,6 +382,7 @@ func (a *GameApp) initGLRenderer() error {
 	}
 	a.demoTexture = demoTexture
 	slog.Debug("open gl renderer success", slog.Any("logicalSize", logicalSize))
+	slog.Debug("render debug textures", slog.Any("textures", a.renderer.DebugTextures()))
 	return nil
 }
 
