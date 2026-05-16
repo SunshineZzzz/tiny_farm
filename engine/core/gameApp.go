@@ -239,6 +239,10 @@ func (a *GameApp) init() error {
 		return err
 	}
 
+	if err := a.initCamera(); err != nil {
+		return err
+	}
+
 	if err := a.initGLRenderer(); err != nil {
 		return err
 	}
@@ -291,6 +295,18 @@ func (a *GameApp) initGameState() error {
 		a.gameState.SetLogicalSize(a.logicalRenderSize())
 	}
 	slog.Debug("game state init success")
+	return nil
+}
+
+// 初始化当前阶段使用的世界相机
+func (a *GameApp) initCamera() error {
+	logicalSize := a.logicalRenderSize()
+	a.camera = render.NewCamera(logicalSize)
+	// 当前阶段还没有地图中心、出生点或跟随目标来决定初始视角
+	// 先把相机中心放到逻辑画布中心附近，使默认可视区域从世界原点附近开始
+	// 这只是骨架阶段的临时默认值，后续应由场景或地图装配决定相机初始位置
+	a.camera.SetPosition(logicalSize.Mul(0.5))
+	slog.Debug("camera init success", slog.Any("logicalSize", logicalSize))
 	return nil
 }
 
@@ -357,11 +373,6 @@ func (a *GameApp) initGLRenderer() error {
 	// a.renderer.SetAmbientLightColor(mgl32.Vec4{0.0, 0.0, 0.0, 1.0})
 	// 低亮度暖灰环境光，适合作为黄昏默认底光，只抬暗部，不明显改变整体色调
 	a.renderer.SetAmbientLightColor(mgl32.Vec4{0.10, 0.085, 0.075, 1.0})
-	a.camera = render.NewCamera(logicalSize)
-	// 当前阶段还没有地图中心、出生点或跟随目标来决定初始视角
-	// 先把相机中心放到逻辑画布中心附近，使默认可视区域从世界原点附近开始
-	// 这只是骨架阶段的临时默认值，后续应由场景或地图装配决定相机初始位置
-	a.camera.SetPosition(logicalSize.Mul(0.5))
 	demoTexture, err := a.renderer.LoadTexture("assets/tests/Button Normal.png")
 	if err != nil {
 		return err
