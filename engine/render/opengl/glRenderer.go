@@ -199,6 +199,14 @@ func (gr *GLRenderer) SetLightingEnabled(enabled bool) {
 	gr.lightingPass.setEnabled(enabled)
 }
 
+// 设置是否启用世界层自发光合成
+func (gr *GLRenderer) SetEmissiveEnabled(enabled bool) {
+	if gr == nil || gr.emissivePass == nil {
+		return
+	}
+	gr.emissivePass.setEnabled(enabled)
+}
+
 // 设置是否启用自发光 Bloom 后处理
 func (gr *GLRenderer) SetBloomEnabled(enabled bool) {
 	if gr == nil || gr.bloomPass == nil {
@@ -406,6 +414,56 @@ func (gr *GLRenderer) Present() error {
 	gr.renderCtx.swapWindow()
 
 	return nil
+}
+
+// 返回上一帧各 pass 的渲染统计
+func (gr *GLRenderer) RenderStats() RenderStats {
+	if gr == nil {
+		return RenderStats{}
+	}
+
+	var stats RenderStats
+	if gr.scenePass != nil {
+		stats.Scene = gr.scenePass.renderStats()
+	}
+	if gr.lightingPass != nil {
+		stats.Lighting = gr.lightingPass.renderStats()
+	}
+	if gr.emissivePass != nil {
+		stats.Emissive = gr.emissivePass.renderStats()
+	}
+	if gr.bloomPass != nil {
+		stats.Bloom = gr.bloomPass.renderStats()
+	}
+	if gr.compositePass != nil {
+		stats.Composite = gr.compositePass.renderStats()
+	}
+	if gr.uiPass != nil {
+		stats.UI = gr.uiPass.renderStats()
+	}
+	return stats
+}
+
+// 返回阶段 8 核心中间纹理的调试信息
+func (gr *GLRenderer) DebugTextures() DebugTextures {
+	if gr == nil {
+		return DebugTextures{}
+	}
+
+	var textures DebugTextures
+	if gr.scenePass != nil {
+		textures.SceneColor = textureDebugInfo("scene_color", gr.scenePass.texture())
+	}
+	if gr.lightingPass != nil {
+		textures.LightColor = textureDebugInfo("light_color", gr.lightingPass.colorTexture)
+	}
+	if gr.emissivePass != nil {
+		textures.EmissiveColor = textureDebugInfo("emissive_color", gr.emissivePass.colorTexture)
+	}
+	if gr.bloomPass != nil && len(gr.bloomPass.levels) > 0 {
+		textures.BloomColor = textureDebugInfo("bloom_color", gr.bloomPass.levels[0].pongTexture)
+	}
+	return textures
 }
 
 // 设置垂直同步

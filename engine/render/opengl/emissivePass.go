@@ -25,6 +25,10 @@ type emissivePass struct {
 	colorTexture *Texture
 	// 离屏缓冲尺寸，固定等于逻辑分辨率
 	size mgl32.Vec2
+	// 是否启用自发光合成
+	enabled bool
+	// 上一帧统计
+	stats PassStats
 	// 视图投影 uniform 位置
 	viewProjLocation int32
 	// 自发光纹理采样器 uniform 位置
@@ -48,15 +52,24 @@ func newEmissivePass(glCtx gl.Context, logicalSize mgl32.Vec2, shader *shaderPro
 	}
 
 	pass := &emissivePass{
-		glCtx:  glCtx,
-		shader: shader,
-		size:   logicalSize,
+		glCtx:   glCtx,
+		shader:  shader,
+		size:    logicalSize,
+		enabled: true,
 	}
 	if err := pass.init(); err != nil {
 		pass.clean()
 		return nil, err
 	}
 	return pass, nil
+}
+
+// 设置是否启用自发光 pass
+func (p *emissivePass) setEnabled(enabled bool) {
+	if p == nil {
+		return
+	}
+	p.enabled = enabled
 }
 
 // 将纯色自发光矩形加入队列
@@ -93,6 +106,13 @@ func (p *emissivePass) render() error {
 		return nil
 	}
 
+	if !p.enabled {
+		p.stats = PassStats{Enabled: false}
+		p.batch.reset()
+		return nil
+	}
+	p.stats = passStatsFromBatch(true, p.batch.stats())
+
 	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, p.framebuffer)
 	p.glCtx.Viewport(0, 0, int32(p.size.X()), int32(p.size.Y()))
 	p.glCtx.Enable(gl.BLEND)
@@ -112,10 +132,18 @@ func (p *emissivePass) render() error {
 
 // 返回自发光输出纹理
 func (p *emissivePass) texture() *Texture {
-	if p == nil {
+	if p == nil || !p.enabled {
 		return nil
 	}
 	return p.colorTexture
+}
+
+// 返回上一帧自发光 pass 统计
+func (p *emissivePass) renderStats() PassStats {
+	if p == nil {
+		return PassStats{}
+	}
+	return p.stats
 }
 
 // 释放自发光 pass 的 OpenGL 资源
@@ -140,6 +168,7 @@ func (p *emissivePass) clean() {
 	p.viewProjLocation = -1
 	p.textureLocation = -1
 	p.useTextureLocation = -1
+	p.stats = PassStats{}
 }
 
 // 恢复后续 pass 使用的默认 OpenGL 状态

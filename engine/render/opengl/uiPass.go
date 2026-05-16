@@ -25,6 +25,8 @@ type uiPass struct {
 	textureLocation int32
 	// 批处理是否采样纹理 uniform 位置
 	useTextureLocation int32
+	// 上一帧统计
+	stats PassStats
 }
 
 // 创建 UI pass
@@ -76,6 +78,7 @@ func (p *uiPass) render(viewport emath.Rect, logicalSize mgl32.Vec2) error {
 		return errors.New("ui logical size is invalid")
 	}
 
+	p.stats = passStatsFromBatch(true, p.batch.stats())
 	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
 	p.glCtx.Viewport(
 		int32(viewport.Position.X()),
@@ -95,6 +98,14 @@ func (p *uiPass) render(viewport emath.Rect, logicalSize mgl32.Vec2) error {
 	return nil
 }
 
+// 返回上一帧 UI pass 统计
+func (p *uiPass) renderStats() PassStats {
+	if p == nil {
+		return PassStats{}
+	}
+	return p.stats
+}
+
 // 释放 UI pass 的 OpenGL 资源
 func (p *uiPass) clean() {
 	if p == nil {
@@ -109,6 +120,7 @@ func (p *uiPass) clean() {
 	p.viewProjLocation = -1
 	p.textureLocation = -1
 	p.useTextureLocation = -1
+	p.stats = PassStats{}
 }
 
 // 初始化 UI uniform 和批处理资源

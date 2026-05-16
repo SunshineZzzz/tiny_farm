@@ -43,6 +43,8 @@ type compositePass struct {
 	ambientLocation int32
 	// Bloom 强度 uniform 位置
 	bloomStrengthLocation int32
+	// 上一帧统计
+	stats PassStats
 }
 
 // 合成输入纹理集合
@@ -136,6 +138,7 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 		return err
 	}
 
+	p.stats = passStatsFromBatch(true, p.batch.stats())
 	p.shader.use()
 	viewProj := mgl32.Ortho(0, viewport.Size.X(), viewport.Size.Y(), 0, -1, 1)
 	p.glCtx.UniformMatrix4fv(p.viewProjLocation, viewProj[:])
@@ -192,6 +195,14 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 	return nil
 }
 
+// 返回上一帧合成 pass 统计
+func (p *compositePass) renderStats() PassStats {
+	if p == nil {
+		return PassStats{}
+	}
+	return p.stats
+}
+
 // 设置环境光颜色
 func (p *compositePass) setAmbientColor(color mgl32.Vec4) {
 	if p == nil {
@@ -238,6 +249,7 @@ func (p *compositePass) clean() {
 	p.bloomTextureLocation = -1
 	p.ambientLocation = -1
 	p.bloomStrengthLocation = -1
+	p.stats = PassStats{}
 }
 
 // 初始化合成 uniform 和批处理资源

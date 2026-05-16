@@ -109,6 +109,8 @@ type lightingPass struct {
 	dirSoftnessLocation int32
 	// 正午混合强度 uniform 位置
 	middayBlendLocation int32
+	// 上一帧统计
+	stats PassStats
 }
 
 // 创建光照 pass
@@ -315,8 +317,17 @@ func (p *lightingPass) render() error {
 	}
 
 	if !p.enabled {
+		p.stats = PassStats{Enabled: false}
 		p.commands = p.commands[:0]
 		return nil
+	}
+	p.stats = PassStats{
+		Enabled:   true,
+		DrawCalls: len(p.commands),
+		Lights:    len(p.commands),
+		Sprites:   len(p.commands),
+		Vertices:  len(p.commands) * lightQuadVertexCount,
+		Indices:   len(p.commands) * lightQuadIndexCount,
 	}
 
 	if len(p.commands) == 0 {
@@ -357,6 +368,14 @@ func (p *lightingPass) texture() *Texture {
 	return p.colorTexture
 }
 
+// 返回上一帧光照 pass 统计
+func (p *lightingPass) renderStats() PassStats {
+	if p == nil {
+		return PassStats{}
+	}
+	return p.stats
+}
+
 // 释放光照缓冲资源
 func (p *lightingPass) clean() {
 	if p == nil {
@@ -385,6 +404,7 @@ func (p *lightingPass) clean() {
 	}
 	p.shader = nil
 	p.commands = nil
+	p.stats = PassStats{}
 }
 
 // 创建光源 quad 使用的缓冲

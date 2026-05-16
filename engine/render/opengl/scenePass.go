@@ -31,6 +31,8 @@ type scenePass struct {
 	textureLocation int32
 	// 批处理是否采样纹理 uniform 位置
 	useTextureLocation int32
+	// 上一帧统计
+	stats PassStats
 }
 
 // 创建场景离屏渲染目标
@@ -91,6 +93,7 @@ func (p *scenePass) render() error {
 		return nil
 	}
 
+	p.stats = passStatsFromBatch(true, p.batch.stats())
 	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, p.framebuffer)
 	p.glCtx.Viewport(0, 0, int32(p.size.X()), int32(p.size.Y()))
 
@@ -116,6 +119,14 @@ func (p *scenePass) render() error {
 	}
 	p.glCtx.UseProgram(0)
 	return nil
+}
+
+// 返回上一帧场景 pass 统计
+func (p *scenePass) renderStats() PassStats {
+	if p == nil {
+		return PassStats{}
+	}
+	return p.stats
 }
 
 // 返回场景输出纹理
@@ -148,6 +159,7 @@ func (p *scenePass) clean() {
 	p.viewProjLocation = -1
 	p.textureLocation = -1
 	p.useTextureLocation = -1
+	p.stats = PassStats{}
 }
 
 // 初始化 FBO、颜色纹理、uniform 和批处理资源

@@ -33,6 +33,12 @@ type Texture struct {
 	backend *opengl.Texture
 }
 
+// 渲染器上一帧统计
+type RenderStats = opengl.RenderStats
+
+// 渲染器中间纹理调试入口
+type DebugTextures = opengl.DebugTextures
+
 // 点光源绘制参数
 type PointLightOptions struct {
 	// 光源颜色，RGB 表示颜色，Alpha 当前不参与计算
@@ -110,6 +116,14 @@ func (r *Renderer) SetLightingEnabled(enabled bool) {
 		return
 	}
 	r.backend.SetLightingEnabled(enabled)
+}
+
+// 设置是否启用世界自发光合成
+func (r *Renderer) SetEmissiveEnabled(enabled bool) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetEmissiveEnabled(enabled)
 }
 
 // 设置是否启用世界自发光 Bloom 后处理
@@ -398,6 +412,22 @@ func (r *Renderer) Present() error {
 		return errors.New("renderer is nil")
 	}
 	return r.backend.Present()
+}
+
+// 返回上一帧各 pass 的渲染统计
+func (r *Renderer) RenderStats() RenderStats {
+	if r == nil || r.backend == nil {
+		return RenderStats{}
+	}
+	return r.backend.RenderStats()
+}
+
+// 返回阶段 8 核心中间纹理的调试信息
+func (r *Renderer) DebugTextures() DebugTextures {
+	if r == nil || r.backend == nil {
+		return DebugTextures{}
+	}
+	return r.backend.DebugTextures()
 }
 
 // 设置垂直同步

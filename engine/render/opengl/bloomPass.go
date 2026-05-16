@@ -84,6 +84,8 @@ type bloomPass struct {
 	texelSizeLocation int32
 	// 模糊方向 uniform 位置
 	directionLocation int32
+	// 上一帧统计
+	stats PassStats
 }
 
 // 创建 Bloom 后处理 pass
@@ -138,6 +140,12 @@ func (p *bloomPass) render(input *Texture) error {
 	if p == nil || p.glCtx == nil || p.shader == nil || p.batch == nil {
 		return nil
 	}
+
+	p.stats = PassStats{
+		Enabled:     p.enabled,
+		BloomLevels: len(p.levels),
+	}
+
 	if !p.enabled || input == nil || input.id == 0 || len(p.levels) == 0 {
 		return nil
 	}
@@ -174,6 +182,14 @@ func (p *bloomPass) render(input *Texture) error {
 	}
 
 	return nil
+}
+
+// 返回上一帧 Bloom pass 统计
+func (p *bloomPass) renderStats() PassStats {
+	if p == nil {
+		return PassStats{}
+	}
+	return p.stats
 }
 
 // 返回 Bloom 输出纹理
@@ -220,6 +236,7 @@ func (p *bloomPass) clean() {
 	p.textureLocation = -1
 	p.texelSizeLocation = -1
 	p.directionLocation = -1
+	p.stats = PassStats{}
 }
 
 // 初始化多级 FBO、纹理、uniform 和全屏批处理器
@@ -386,6 +403,10 @@ func (p *bloomPass) drawTexture(input *Texture, size mgl32.Vec2, direction mgl32
 		p.restoreState()
 		return err
 	}
+	p.stats.DrawCalls++
+	p.stats.Sprites++
+	p.stats.Vertices += spriteVertexCount
+	p.stats.Indices += spriteIndexCount
 	p.restoreState()
 	return nil
 }

@@ -326,6 +326,23 @@ func (b *spriteBatch) flush(textureLocation int32, useTextureLocation int32) err
 	return nil
 }
 
+// 返回当前队列的提交规模
+//
+// 调用方应在 flush 前读取，flush 会清空 CPU 端队列
+func (b *spriteBatch) stats() spriteBatchStats {
+	if b == nil {
+		return spriteBatchStats{}
+	}
+
+	sprites := len(b.vertices) / (spriteVertexCount * spriteVertexFloatCount)
+	return spriteBatchStats{
+		drawCalls: len(b.commands),
+		sprites:   sprites,
+		vertices:  sprites * spriteVertexCount,
+		indices:   len(b.indices),
+	}
+}
+
 // 清空 CPU 端队列，保留底层容量用于下一帧复用
 func (b *spriteBatch) reset() {
 	b.vertices = b.vertices[:0]
