@@ -87,6 +87,12 @@ type lightingPass struct {
 	commands []lightCommand
 	// 是否启用光照合成
 	enabled bool
+	// 是否启用点光源
+	pointLightEnabled bool
+	// 是否启用聚光灯
+	spotLightEnabled bool
+	// 是否启用方向光
+	directionalLightEnabled bool
 	// 视图投影 uniform 位置
 	viewProjLocation int32
 	// 光源颜色 uniform 位置
@@ -128,10 +134,13 @@ func newLightingPass(glCtx gl.Context, logicalSize mgl32.Vec2, shader *shaderPro
 	}
 
 	pass := &lightingPass{
-		glCtx:   glCtx,
-		shader:  shader,
-		size:    logicalSize,
-		enabled: true,
+		glCtx:                   glCtx,
+		shader:                  shader,
+		size:                    logicalSize,
+		enabled:                 true,
+		pointLightEnabled:       true,
+		spotLightEnabled:        true,
+		directionalLightEnabled: true,
 	}
 
 	if err := pass.init(); err != nil {
@@ -218,6 +227,30 @@ func (p *lightingPass) setEnabled(enabled bool) {
 		return
 	}
 	p.enabled = enabled
+}
+
+// 设置是否启用点光源
+func (p *lightingPass) setPointLightEnabled(enabled bool) {
+	if p == nil {
+		return
+	}
+	p.pointLightEnabled = enabled
+}
+
+// 设置是否启用聚光灯
+func (p *lightingPass) setSpotLightEnabled(enabled bool) {
+	if p == nil {
+		return
+	}
+	p.spotLightEnabled = enabled
+}
+
+// 设置是否启用方向光
+func (p *lightingPass) setDirectionalLightEnabled(enabled bool) {
+	if p == nil {
+		return
+	}
+	p.directionalLightEnabled = enabled
 }
 
 // 提交点光源
@@ -321,16 +354,11 @@ func (p *lightingPass) render() error {
 		p.commands = p.commands[:0]
 		return nil
 	}
-	p.stats = PassStats{
-		Enabled:   true,
-		DrawCalls: len(p.commands),
-		Lights:    len(p.commands),
-		Sprites:   len(p.commands),
-		Vertices:  len(p.commands) * lightQuadVertexCount,
-		Indices:   len(p.commands) * lightQuadIndexCount,
-	}
 
-	if len(p.commands) == 0 {
+	enabledCommands := p.enabledCommands()
+	p.stats = p.statsFromCommands(enabledCommands)
+	if len(enabledCommands) == 0 {
+		p.commands = p.commands[:0]
 		p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
 		return nil
 	}
@@ -347,7 +375,7 @@ func (p *lightingPass) render() error {
 	// 设置混合系数,  RGB源系数1, RGB目标系数1, Alpha源系数1, Alpha目标系数1
 	p.glCtx.BlendFuncSeparate(gl.ONE, gl.ONE, gl.ONE, gl.ONE)
 
-	for _, command := range p.commands {
+	for _, command := range enabledCommands {
 		p.applyCommandUniforms(command)
 		if err := p.drawCommand(command); err != nil {
 			p.restoreState()
@@ -374,6 +402,62 @@ func (p *lightingPass) renderStats() PassStats {
 		return PassStats{}
 	}
 	return p.stats
+}
+
+// 返回当前开关允许绘制的光源命令
+func (p *lightingPass) enabledCommands() []lightCommand {
+	if p == nil {
+		return nil
+	}
+
+	enabledCommands := p.commands[:0]
+	for _, command := range p.commands {
+		if p.isLightTypeEnabled(command.lightType) {
+			enabledCommands = append(enabledCommands, command)
+		}
+	}
+	return enabledCommands
+}
+
+// 返回指定光源类型是否启用
+func (p *lightingPass) isLightTypeEnabled(lightType int32) bool {
+	if p == nil {
+		return false
+	}
+
+	switch lightType {
+	case lightTypePoint:
+		return p.pointLightEnabled
+	case lightTypeSpot:
+		return p.spotLightEnabled
+	case lightTypeDirectional:
+		return p.directionalLightEnabled
+	default:
+		return false
+	}
+}
+
+// 根据实际绘制的光源命令生成统计
+func (p *lightingPass) statsFromCommands(commands []lightCommand) PassStats {
+	stats := PassStats{
+		Enabled:   true,
+		DrawCalls: len(commands),
+		Lights:    len(commands),
+		Sprites:   len(commands),
+		Vertices:  len(commands) * lightQuadVertexCount,
+		Indices:   len(commands) * lightQuadIndexCount,
+	}
+	for _, command := range commands {
+		switch command.lightType {
+		case lightTypePoint:
+			stats.PointLights++
+		case lightTypeSpot:
+			stats.SpotLights++
+		case lightTypeDirectional:
+			stats.DirectionalLights++
+		}
+	}
+	return stats
 }
 
 // 释放光照缓冲资源

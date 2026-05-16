@@ -372,6 +372,9 @@ func (a *GameApp) initGLRenderer() error {
 	a.renderer.SetVSyncEnabled(a.config.Graphics.Vsync)
 	a.renderer.SetViewportClippingEnabled(true)
 	a.renderer.SetPixelSnapEnabled(true)
+	a.renderer.SetPointLightEnabled(true)
+	a.renderer.SetSpotLightEnabled(true)
+	a.renderer.SetDirectionalLightEnabled(true)
 	a.renderer.SetBloomEnabled(true)
 	if err := a.renderer.SetBloomLevelCount(4); err != nil {
 		return err

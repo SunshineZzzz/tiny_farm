@@ -199,6 +199,30 @@ func (gr *GLRenderer) SetLightingEnabled(enabled bool) {
 	gr.lightingPass.setEnabled(enabled)
 }
 
+// 设置是否启用世界层点光源
+func (gr *GLRenderer) SetPointLightEnabled(enabled bool) {
+	if gr == nil || gr.lightingPass == nil {
+		return
+	}
+	gr.lightingPass.setPointLightEnabled(enabled)
+}
+
+// 设置是否启用世界层聚光灯
+func (gr *GLRenderer) SetSpotLightEnabled(enabled bool) {
+	if gr == nil || gr.lightingPass == nil {
+		return
+	}
+	gr.lightingPass.setSpotLightEnabled(enabled)
+}
+
+// 设置是否启用世界层方向光
+func (gr *GLRenderer) SetDirectionalLightEnabled(enabled bool) {
+	if gr == nil || gr.lightingPass == nil {
+		return
+	}
+	gr.lightingPass.setDirectionalLightEnabled(enabled)
+}
+
 // 设置是否启用世界层自发光合成
 func (gr *GLRenderer) SetEmissiveEnabled(enabled bool) {
 	if gr == nil || gr.emissivePass == nil {

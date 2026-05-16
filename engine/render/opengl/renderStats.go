@@ -18,6 +18,12 @@ type PassStats struct {
 	Indices int
 	// 本 pass 处理的光源数量
 	Lights int
+	// 本 pass 处理的点光源数量
+	PointLights int
+	// 本 pass 处理的聚光灯数量
+	SpotLights int
+	// 本 pass 处理的方向光数量
+	DirectionalLights int
 	// Bloom pass 当前持有的降采样层数
 	BloomLevels int
 	// Bloom pass 当前使用的高斯模糊 Sigma

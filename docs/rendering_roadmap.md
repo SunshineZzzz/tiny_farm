@@ -432,7 +432,9 @@
 
 - 已提供 `Renderer.RenderStats()`，可查询 scene/lighting/emissive/bloom/composite/ui 的上一帧提交规模
 - 已提供 `Renderer.DebugTextures()`，可查询 scene/light/emissive/bloom 中间纹理句柄、尺寸和调试名称
-- 已提供 lighting/emissive/bloom 开关，以及 ambient、bloom strength、bloom sigma、bloom level count 参数入口
+- 已提供 lighting/emissive/bloom 开关，以及 point/spot/directional light 类型开关
+- 已提供 ambient、bloom strength、bloom sigma、bloom level count 参数入口
+- pass stats 日志已包含光源分类数量和 Bloom 运行时参数
 
 要做：
 
@@ -476,7 +478,6 @@
 
 ## 近期最小任务
 
-阶段 1 到阶段 8.6 的最小调试闭环已经形成。Bloom sigma 和 Bloom level count 已经具备运行时参数入口。下一步应补阶段 8.6 的剩余光源控制，再进入阶段 9 的上层渲染能力。
+阶段 1 到阶段 8.6 的最小调试闭环已经形成。Bloom sigma、Bloom level count 和光源类型开关已经具备运行时参数入口。下一步可以进入阶段 9 的上层渲染能力。
 
-- 阶段 8.6e：补更细的光源类型开关和 pass stats 日志输出入口
 - 阶段 9：在 pass 边界稳定后，再补线段、九宫格、文字、ECS 渲染和资源管理

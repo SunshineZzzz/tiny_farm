@@ -118,6 +118,30 @@ func (r *Renderer) SetLightingEnabled(enabled bool) {
 	r.backend.SetLightingEnabled(enabled)
 }
 
+// 设置是否启用世界层点光源
+func (r *Renderer) SetPointLightEnabled(enabled bool) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetPointLightEnabled(enabled)
+}
+
+// 设置是否启用世界层聚光灯
+func (r *Renderer) SetSpotLightEnabled(enabled bool) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetSpotLightEnabled(enabled)
+}
+
+// 设置是否启用世界层方向光
+func (r *Renderer) SetDirectionalLightEnabled(enabled bool) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetDirectionalLightEnabled(enabled)
+}
+
 // 设置是否启用世界自发光合成
 func (r *Renderer) SetEmissiveEnabled(enabled bool) {
 	if r == nil || r.backend == nil {
