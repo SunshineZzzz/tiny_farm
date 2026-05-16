@@ -270,7 +270,7 @@
 | 8.2 `UIPass` | UI 精灵绘制到默认帧缓冲 viewport | 已拆出独立 `UIPass`，UI 使用 logical 坐标并在 CompositePass 之后绘制 | 后续还要接入完整 UI 框架 |
 | 8.3 `LightingPass` | 生成 `light_color_tex`，承载方向光、点光、聚光；环境光由 CompositePass uniform 合成 | 已有 `light_color_tex`、清黑加法累计、ambient 分离、方向光/点光/聚光提交通道，并已接入 `CompositePass` | 后续继续补光照参数调试和更完整的光源开关 |
 | 8.4 `EmissivePass` | 生成 `emissive_color_tex`，承载发光遮罩 | 已有独立自发光 FBO、矩形/贴图提交通道、CompositePass 黑纹理兜底、运行时开关，并作为 Bloom 输入 | 后续继续补更细的 emissive 参数控制 |
-| 8.5 `BloomPass` | 对 emissive 做降采样、模糊、上采样并输出 `bloom_tex` | 已有 4 层降采样、ping-pong 模糊、逐级上采样叠加、CompositePass bloom strength、bloom 开关和调试纹理入口 | 后续继续补 sigma/level 运行时参数 |
+| 8.5 `BloomPass` | 对 emissive 做降采样、模糊、上采样并输出 `bloom_tex` | 已有可调层数降采样、可调 sigma 模糊、ping-pong 模糊、逐级上采样叠加、CompositePass bloom strength、bloom 开关和调试纹理入口 | 后续继续补更细的 Bloom 预设和调试显示 |
 
 ### 阶段 8.1：CompositePass
 
@@ -432,14 +432,14 @@
 
 - 已提供 `Renderer.RenderStats()`，可查询 scene/lighting/emissive/bloom/composite/ui 的上一帧提交规模
 - 已提供 `Renderer.DebugTextures()`，可查询 scene/light/emissive/bloom 中间纹理句柄、尺寸和调试名称
-- 已提供 lighting/emissive/bloom 开关，以及 ambient、bloom strength 参数入口
+- 已提供 lighting/emissive/bloom 开关，以及 ambient、bloom strength、bloom sigma、bloom level count 参数入口
 
 要做：
 
 - 增加 pass stats 结构，记录 scene/lighting/emissive/bloom/ui 的 draw calls、sprites、vertices、indices
 - 暴露 scene/light/emissive/bloom 中间纹理句柄或调试读取入口
 - 增加运行时开关：viewport clipping、pixel snap、point/spot/directional light、emissive、bloom
-- 增加参数入口：ambient、bloom strength、bloom sigma
+- 增加参数入口：ambient、bloom strength、bloom sigma、bloom level count
 
 验收：
 
@@ -476,8 +476,7 @@
 
 ## 近期最小任务
 
-阶段 1 到阶段 8.6 的最小调试闭环已经形成。下一步应补阶段 8.6 的剩余运行时参数，再进入阶段 9 的上层渲染能力。
+阶段 1 到阶段 8.6 的最小调试闭环已经形成。Bloom sigma 和 Bloom level count 已经具备运行时参数入口。下一步应补阶段 8.6 的剩余光源控制，再进入阶段 9 的上层渲染能力。
 
-- 阶段 8.6d：补 bloom sigma / bloom level 运行时参数，替代当前 shader 常量和固定层数
 - 阶段 8.6e：补更细的光源类型开关和 pass stats 日志输出入口
 - 阶段 9：在 pass 边界稳定后，再补线段、九宫格、文字、ECS 渲染和资源管理

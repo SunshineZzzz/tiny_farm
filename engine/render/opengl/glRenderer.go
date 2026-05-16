@@ -215,6 +215,22 @@ func (gr *GLRenderer) SetBloomEnabled(enabled bool) {
 	gr.bloomPass.setEnabled(enabled)
 }
 
+// 设置 Bloom 降采样层数
+func (gr *GLRenderer) SetBloomLevelCount(levelCount int) error {
+	if gr == nil || gr.bloomPass == nil {
+		return nil
+	}
+	return gr.bloomPass.setLevelCount(levelCount)
+}
+
+// 设置 Bloom 高斯模糊 Sigma
+func (gr *GLRenderer) SetBloomSigma(sigma float32) {
+	if gr == nil || gr.bloomPass == nil {
+		return
+	}
+	gr.bloomPass.setSigma(sigma)
+}
+
 // 设置 Bloom 合成强度
 func (gr *GLRenderer) SetBloomStrength(strength float32) {
 	if gr == nil || gr.compositePass == nil {

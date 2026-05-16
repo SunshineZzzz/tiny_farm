@@ -373,6 +373,10 @@ func (a *GameApp) initGLRenderer() error {
 	a.renderer.SetViewportClippingEnabled(true)
 	a.renderer.SetPixelSnapEnabled(true)
 	a.renderer.SetBloomEnabled(true)
+	if err := a.renderer.SetBloomLevelCount(4); err != nil {
+		return err
+	}
+	a.renderer.SetBloomSigma(2.0)
 	// a.renderer.SetAmbientLightColor(mgl32.Vec4{0.0, 0.0, 0.0, 1.0})
 	// 低亮度暖灰环境光，适合作为黄昏默认底光，只抬暗部，不明显改变整体色调
 	a.renderer.SetAmbientLightColor(mgl32.Vec4{0.10, 0.085, 0.075, 1.0})

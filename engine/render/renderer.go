@@ -134,6 +134,22 @@ func (r *Renderer) SetBloomEnabled(enabled bool) {
 	r.backend.SetBloomEnabled(enabled)
 }
 
+// 设置世界自发光 Bloom 降采样层数
+func (r *Renderer) SetBloomLevelCount(levelCount int) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	return r.backend.SetBloomLevelCount(levelCount)
+}
+
+// 设置世界自发光 Bloom 高斯模糊 Sigma
+func (r *Renderer) SetBloomSigma(sigma float32) {
+	if r == nil || r.backend == nil {
+		return
+	}
+	r.backend.SetBloomSigma(sigma)
+}
+
 // 设置世界自发光 Bloom 合成强度
 func (r *Renderer) SetBloomStrength(strength float32) {
 	if r == nil || r.backend == nil {

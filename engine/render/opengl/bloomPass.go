@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	emath "tiny_farm/engine/utils/math"
 	gl "tiny_farm/engine/utils/opengl"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -40,8 +41,19 @@ const (
 	// 中等光晕(Level2)会"渗透"到上面两层
 	// 小光晕(Level1)只影响最上层
 	// 结果：每个像素最终的颜色包含了所有尺度的光晕贡献
-	// Bloom 降采样层数，当前先固定为 4 层
-	bloomLevelCount = 4
+	// 默认 Bloom 降采样层数
+	defaultBloomLevelCount = 4
+	// 默认 Bloom 高斯模糊 Sigma
+	// 小于1.5, 太弱/没变化，高斯曲线太陡峭
+	// 1.5到3.0, 丝滑/恰到好处, 高斯曲线完美
+	// 大于3.0, 出现“硬边”/方块感, 高斯曲线变得太扁平
+	defaultBloomSigma = 2.0
+	// 最小 Bloom 降采样层数
+	minBloomLevelCount = 1
+	// 最大 Bloom 降采样层数，避免极端配置一次性创建过多 FBO
+	maxBloomLevelCount = 8
+	// 最小 Bloom 高斯模糊 Sigma
+	minBloomSigma = 0.001
 )
 
 // Bloom 单层后处理资源
@@ -76,6 +88,10 @@ type bloomPass struct {
 	size mgl32.Vec2
 	// 是否启用 Bloom 后处理
 	enabled bool
+	// Bloom 降采样层数
+	levelCount int
+	// Bloom 高斯模糊 Sigma
+	sigma float32
 	// 视图投影 uniform 位置
 	viewProjLocation int32
 	// 输入纹理采样器 uniform 位置
@@ -84,6 +100,8 @@ type bloomPass struct {
 	texelSizeLocation int32
 	// 模糊方向 uniform 位置
 	directionLocation int32
+	// 高斯模糊 Sigma uniform 位置
+	sigmaLocation int32
 	// 上一帧统计
 	stats PassStats
 }
@@ -103,10 +121,12 @@ func newBloomPass(glCtx gl.Context, logicalSize mgl32.Vec2, shader *shaderProgra
 	}
 
 	pass := &bloomPass{
-		glCtx:   glCtx,
-		shader:  shader,
-		size:    logicalSize,
-		enabled: true,
+		glCtx:      glCtx,
+		shader:     shader,
+		size:       logicalSize,
+		enabled:    true,
+		levelCount: defaultBloomLevelCount,
+		sigma:      defaultBloomSigma,
 	}
 	if err := pass.init(); err != nil {
 		pass.clean()
@@ -121,6 +141,36 @@ func (p *bloomPass) setEnabled(enabled bool) {
 		return
 	}
 	p.enabled = enabled
+}
+
+// 设置 Bloom 降采样层数
+func (p *bloomPass) setLevelCount(levelCount int) error {
+	if p == nil {
+		return nil
+	}
+
+	levelCount = emath.Clamp(levelCount, minBloomLevelCount, maxBloomLevelCount)
+	if levelCount == p.levelCount && len(p.levels) == levelCount {
+		return nil
+	}
+
+	levels, err := p.createLevels(levelCount)
+	if err != nil {
+		return err
+	}
+
+	p.cleanLevels()
+	p.levels = levels
+	p.levelCount = levelCount
+	return nil
+}
+
+// 设置 Bloom 高斯模糊 Sigma
+func (p *bloomPass) setSigma(sigma float32) {
+	if p == nil {
+		return
+	}
+	p.sigma = max(sigma, minBloomSigma)
 }
 
 // 清空 Bloom 后处理缓冲
@@ -144,6 +194,7 @@ func (p *bloomPass) render(input *Texture) error {
 	p.stats = PassStats{
 		Enabled:     p.enabled,
 		BloomLevels: len(p.levels),
+		BloomSigma:  p.sigma,
 	}
 
 	if !p.enabled || input == nil || input.id == 0 || len(p.levels) == 0 {
@@ -206,26 +257,7 @@ func (p *bloomPass) clean() {
 		return
 	}
 
-	for i := range p.levels {
-		level := &p.levels[i]
-		if level.pingTexture != nil {
-			level.pingTexture.Close()
-			level.pingTexture = nil
-		}
-		if level.pongTexture != nil {
-			level.pongTexture.Close()
-			level.pongTexture = nil
-		}
-		if p.glCtx != nil && level.pingFramebuffer != 0 {
-			p.glCtx.DeleteFramebuffer(level.pingFramebuffer)
-			level.pingFramebuffer = 0
-		}
-		if p.glCtx != nil && level.pongFramebuffer != 0 {
-			p.glCtx.DeleteFramebuffer(level.pongFramebuffer)
-			level.pongFramebuffer = 0
-		}
-	}
-	p.levels = nil
+	p.cleanLevels()
 
 	if p.batch != nil {
 		p.batch.clean()
@@ -236,6 +268,7 @@ func (p *bloomPass) clean() {
 	p.textureLocation = -1
 	p.texelSizeLocation = -1
 	p.directionLocation = -1
+	p.sigmaLocation = -1
 	p.stats = PassStats{}
 }
 
@@ -245,15 +278,19 @@ func (p *bloomPass) init() error {
 	p.textureLocation = p.shader.uniformLocation("uTexture")
 	p.texelSizeLocation = p.shader.uniformLocation("uTexelSize")
 	p.directionLocation = p.shader.uniformLocation("uDirection")
+	p.sigmaLocation = p.shader.uniformLocation("uSigma")
 
 	if p.viewProjLocation < 0 || p.textureLocation < 0 ||
-		p.texelSizeLocation < 0 || p.directionLocation < 0 {
+		p.texelSizeLocation < 0 || p.directionLocation < 0 ||
+		p.sigmaLocation < 0 {
 		return errors.New("bloom pass uniform location is invalid")
 	}
 
-	if err := p.createLevels(); err != nil {
+	levels, err := p.createLevels(p.levelCount)
+	if err != nil {
 		return err
 	}
+	p.levels = levels
 
 	batch, err := newSpriteBatch(p.glCtx, minSpriteBatchCapacity)
 	if err != nil {
@@ -264,13 +301,14 @@ func (p *bloomPass) init() error {
 	return nil
 }
 
-// 创建固定层数的 Bloom 降采样目标
+// 创建指定层数的 Bloom 降采样目标
 //
 // 当前每层宽高按上一层一半计算，最小限制为 1 像素，避免极小逻辑分辨率下生成非法纹理
-func (p *bloomPass) createLevels() error {
-	p.levels = make([]bloomLevel, 0, bloomLevelCount)
+func (p *bloomPass) createLevels(levelCount int) ([]bloomLevel, error) {
+	levelCount = emath.Clamp(levelCount, minBloomLevelCount, maxBloomLevelCount)
+	levels := make([]bloomLevel, 0, levelCount)
 	divisor := float32(2.0)
-	for i := range bloomLevelCount {
+	for i := range levelCount {
 		size := mgl32.Vec2{
 			max(1.0, p.size.X()/divisor),
 			max(1.0, p.size.Y()/divisor),
@@ -278,16 +316,18 @@ func (p *bloomPass) createLevels() error {
 
 		pingFramebuffer, pingTexture, err := p.createRenderTarget(size, fmt.Sprintf("bloom-level-%d-ping", i))
 		if err != nil {
-			return err
+			p.cleanLevelSlice(levels)
+			return nil, err
 		}
 		pongFramebuffer, pongTexture, err := p.createRenderTarget(size, fmt.Sprintf("bloom-level-%d-pong", i))
 		if err != nil {
 			pingTexture.Close()
 			p.glCtx.DeleteFramebuffer(pingFramebuffer)
-			return err
+			p.cleanLevelSlice(levels)
+			return nil, err
 		}
 
-		p.levels = append(p.levels, bloomLevel{
+		levels = append(levels, bloomLevel{
 			pingFramebuffer: pingFramebuffer,
 			pongFramebuffer: pongFramebuffer,
 			pingTexture:     pingTexture,
@@ -296,7 +336,7 @@ func (p *bloomPass) createLevels() error {
 		})
 		divisor *= 2.0
 	}
-	return nil
+	return levels, nil
 }
 
 // 创建 Bloom 单层使用的 framebuffer 和颜色纹理
@@ -399,6 +439,7 @@ func (p *bloomPass) drawTexture(input *Texture, size mgl32.Vec2, direction mgl32
 	p.glCtx.UniformMatrix4fv(p.viewProjLocation, viewProj[:])
 	p.glCtx.Uniform2fv(p.texelSizeLocation, []float32{1.0 / size.X(), 1.0 / size.Y()})
 	p.glCtx.Uniform2fv(p.directionLocation, []float32{direction.X(), direction.Y()})
+	p.glCtx.Uniform1fv(p.sigmaLocation, []float32{p.sigma})
 	if err := p.batch.flush(p.textureLocation, -1); err != nil {
 		p.restoreState()
 		return err
@@ -409,6 +450,38 @@ func (p *bloomPass) drawTexture(input *Texture, size mgl32.Vec2, direction mgl32
 	p.stats.Indices += spriteIndexCount
 	p.restoreState()
 	return nil
+}
+
+// 清理当前 Bloom 层资源
+func (p *bloomPass) cleanLevels() {
+	if p == nil {
+		return
+	}
+	p.cleanLevelSlice(p.levels)
+	p.levels = nil
+}
+
+// 清理指定 Bloom 层资源
+func (p *bloomPass) cleanLevelSlice(levels []bloomLevel) {
+	for i := range levels {
+		level := &levels[i]
+		if level.pingTexture != nil {
+			level.pingTexture.Close()
+			level.pingTexture = nil
+		}
+		if level.pongTexture != nil {
+			level.pongTexture.Close()
+			level.pongTexture = nil
+		}
+		if p.glCtx != nil && level.pingFramebuffer != 0 {
+			p.glCtx.DeleteFramebuffer(level.pingFramebuffer)
+			level.pingFramebuffer = 0
+		}
+		if p.glCtx != nil && level.pongFramebuffer != 0 {
+			p.glCtx.DeleteFramebuffer(level.pongFramebuffer)
+			level.pongFramebuffer = 0
+		}
+	}
 }
 
 // 临时切换纹理过滤方式

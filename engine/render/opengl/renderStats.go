@@ -20,6 +20,8 @@ type PassStats struct {
 	Lights int
 	// Bloom pass 当前持有的降采样层数
 	BloomLevels int
+	// Bloom pass 当前使用的高斯模糊 Sigma
+	BloomSigma float32
 }
 
 // 渲染器上一帧统计

@@ -320,28 +320,47 @@ uniform sampler2D uTexture;
 uniform vec2 uTexelSize;
 // 模糊的方向向量，决定模糊是水平、垂直还是斜向
 uniform vec2 uDirection;
+// 高斯分布(正态分布)的标准差，它控制模糊扩散程度
+// 小：权重集中在中心，模糊弱
+// 大：权重扩散更远，模糊强
+// 小于1.5, 太弱/没变化，高斯曲线太陡峭
+// 1.5到3.0, 丝滑/恰到好处, 高斯曲线完美
+// 大于3.0, 出现“硬边”/方块感, 高斯曲线变得太扁平
+uniform float uSigma;
 
 out vec4 FragColor;
+
+// 计算高斯模糊权重的函数
+// 返回值：高斯模糊权重
+// x, 当前采样点距离中心像素的像素个数(即步长偏移量）
+// sigma, 高斯分布的标准差，它控制模糊扩散程度
+float bloomWeight(float x, float sigma) {
+	// exp(x) = e^x => d/dx [exp(x)] = exp(x) => 变化率 = 当前值本身
+	return exp(-0.5 * (x * x) / (sigma * sigma));
+}
 
 void main() {
 	// 在模糊方向上一个像素的偏移量
 	vec2 stepUV = uTexelSize * uDirection;
-	// [0.070270, 0.316216, 0.227027, 0.316216, 0.070270], 高斯模糊权重, 采样点数量5TAP
-	// 中心点, 权重22.7%, 当前像素距离0.0
-	vec3 color = texture(uTexture, vUV).rgb * 0.227027;
-	// 高斯模糊本来需要9TAP, 用更少的采样5TAP, 模拟9TAP的效果
-	// 因为高斯模糊要求第2个格子比第3个格子更重要(权重更高)。如果你看正中间(1.5), 
-	// 两个格子就一样清楚了。所以要稍微往第2个格子挪一点, 算法计算出1.384615
-	// texture(uTexture, uv), 代码层需要设置成线性采样, color ≈ (1 - t) * texel(1) + t * texel(2)
-	// 
-	// 模糊正方向第1、2格的等效采样点, 权重31.6216%
-	color += texture(uTexture, vUV + stepUV * 1.384615).rgb * 0.316216;
-	// 模糊负方向第1、2格的等效采样点, 权重31.6216%
-	color += texture(uTexture, vUV - stepUV * 1.384615).rgb * 0.316216;
-	// 模糊正方向第3、4格的等效采样点, 权重7.0270%
-	color += texture(uTexture, vUV + stepUV * 3.230769).rgb * 0.070270;
-	// 模糊负方向第3、4格的等效采样点, 权重7.0270%
-	color += texture(uTexture, vUV - stepUV * 3.230769).rgb * 0.070270;
+	float sigma = max(uSigma, 0.001);
+	vec3 color = vec3(0.0);
+	float weightSum = 0.0;
+	// 13TAP
+	for (int i = -6; i <= 6; ++i) {
+		float offset = float(i);
+		// 计算当前偏移位置的像素应该占据多大的权重
+		float weight = bloomWeight(offset, sigma);
+		// 计算出采样点的精确 UV 坐标(在中心点沿模糊方向移动offset个像素)
+		// 获取该采样点像素的颜色
+		// 只取其RGB颜色(丢弃 Alpha 通道), 乘以刚计算出的权重, 然后累加到color中
+		color += texture(uTexture, vUV + stepUV * offset).rgb * weight;
+		weightSum += weight;
+	}
+	// color, 13 个纹素加权后的总和
+	// 权重归一化, 加权和转换为加权平均
+	// 因为之前计算的离散高斯权重之和不一定精准等于 1.0
+	// 如果不除以权重总和, 整个画面的亮度可能会变暗或变亮
+	color /= max(weightSum, 0.000001);
 	// vColor没实际意义, 因为BloomPass复用了SpriteBatch, 所以shader还带着vColor。但实际传入永远是白色
 	FragColor = vec4(color * vColor.rgb, 1.0);
 }
