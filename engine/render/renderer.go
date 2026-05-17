@@ -320,20 +320,28 @@ func (r *Renderer) DrawRectOutline(rect mgl32.Vec4, thickness float32, color mgl
 	if rect.Z() <= 0.0 || rect.W() <= 0.0 || thickness <= 0.0 {
 		return nil
 	}
-	leftTop := mgl32.Vec2{rect.X(), rect.Y()}
-	rightTop := mgl32.Vec2{rect.X() + rect.Z(), rect.Y()}
-	rightBottom := mgl32.Vec2{rect.X() + rect.Z(), rect.Y() + rect.W()}
-	leftBottom := mgl32.Vec2{rect.X(), rect.Y() + rect.W()}
-	if err := r.DrawLine(leftTop, rightTop, thickness, color); err != nil {
+
+	// 把中心线矩形扩成真正要覆盖的外包矩形
+	halfThickness := thickness * 0.5
+	x := rect.X() - halfThickness
+	y := rect.Y() - halfThickness
+	width := rect.Z() + thickness
+	height := rect.W() + thickness
+
+	// 上边
+	if err := r.DrawRect(mgl32.Vec4{x, y, width, thickness}, color); err != nil {
 		return err
 	}
-	if err := r.DrawLine(rightTop, rightBottom, thickness, color); err != nil {
+	// 下边
+	if err := r.DrawRect(mgl32.Vec4{x, y + height - thickness, width, thickness}, color); err != nil {
 		return err
 	}
-	if err := r.DrawLine(rightBottom, leftBottom, thickness, color); err != nil {
+	// 左边
+	if err := r.DrawRect(mgl32.Vec4{x, y, thickness, height}, color); err != nil {
 		return err
 	}
-	return r.DrawLine(leftBottom, leftTop, thickness, color)
+	// 右边
+	return r.DrawRect(mgl32.Vec4{x + width - thickness, y, thickness, height}, color)
 }
 
 // 绘制世界坐标系下的矩形边框
@@ -344,20 +352,25 @@ func (r *Renderer) DrawWorldRectOutline(rect mgl32.Vec4, thickness float32, colo
 	if rect.Z() <= 0.0 || rect.W() <= 0.0 || thickness <= 0.0 {
 		return nil
 	}
-	leftTop := mgl32.Vec2{rect.X(), rect.Y()}
-	rightTop := mgl32.Vec2{rect.X() + rect.Z(), rect.Y()}
-	rightBottom := mgl32.Vec2{rect.X() + rect.Z(), rect.Y() + rect.W()}
-	leftBottom := mgl32.Vec2{rect.X(), rect.Y() + rect.W()}
-	if err := r.DrawWorldLine(leftTop, rightTop, thickness, color); err != nil {
-		return err
+
+	if r.currentCamera == nil {
+		return r.DrawRectOutline(rect, thickness, color)
 	}
-	if err := r.DrawWorldLine(rightTop, rightBottom, thickness, color); err != nil {
-		return err
+
+	halfThickness := thickness * 0.5
+	expandedRect := mgl32.Vec4{
+		rect.X() - halfThickness,
+		rect.Y() - halfThickness,
+		rect.Z() + thickness,
+		rect.W() + thickness,
 	}
-	if err := r.DrawWorldLine(rightBottom, leftBottom, thickness, color); err != nil {
-		return err
+	if r.viewportClippingEnabled && r.shouldCullWorldRect(expandedRect) {
+		return nil
 	}
-	return r.DrawWorldLine(leftBottom, leftTop, thickness, color)
+
+	logicalRect := r.currentCamera.worldRectToLogical(rect, r.pixelSnapEnabled)
+	logicalThickness := thickness * r.currentCamera.Zoom()
+	return r.DrawRectOutline(logicalRect, logicalThickness, color)
 }
 
 // 绘制逻辑坐标系下的圆形边框

@@ -453,7 +453,7 @@
 
 阶段 9 不阻塞多 pass 主线，等 Scene/Lighting/Emissive/Bloom/Composite/UI 的边界稳定后再推进。
 
-阶段 9 需要继续拆分，先做不依赖 UI、文字、资源管理器和 ECS 的 Renderer API，再评估更高层系统。
+阶段 9 需要继续拆分。当前只先保留 9.1 的基础调试绘制能力，9.2 之后的 sprite 参数、渐变和高层绘制 API 暂缓，等 ECS、资源管理器、SpriteComponent 和场景系统边界稳定后再设计，避免提前固定一套后续会被组件系统推翻的接口。
 
 ### 阶段 9.1：基础调试绘制 API
 
@@ -478,22 +478,28 @@
 
 ### 阶段 9.2：Sprite 绘制参数补齐
 
+状态：暂缓
+
 目标：
 
 - 对齐 `copy_source` 中 sprite 的旋转、翻转、pivot/origin、tint/alpha 等参数
 - 把当前固定矩形绘制扩展成可表达 TransformOptions / ColorOptions 的绘制入口
+- 等 ECS、资源管理器和 SpriteComponent 接入后，再确定这些参数应作为组件数据、绘制参数还是资源默认值
 
 ### 阶段 9.3：渐变与扩展形状
+
+状态：暂缓
 
 目标：
 
 - 补渐变矩形和渐变贴图
 - 扩展多色顶点能力
 - 统一线宽和调试形状策略
+- 依赖 9.2 的 ColorOptions / TransformOptions 边界，暂不单独推进
 
 ### 阶段 9 后续暂缓项
 
-这些能力会牵涉资源描述、字体或游戏对象系统，等 9.1 到 9.3 稳定后再推进：
+这些能力会牵涉资源描述、字体或游戏对象系统，等 ECS、资源管理器和场景系统边界稳定后再推进：
 
 - 九宫格 UI：迁移 `nine_slice.*` 的绘制约定和资源描述
 - 文字渲染：参考 `text_renderer.*`、`docs/text_rendering.md`，引入字体图集、glyph 布局和文字样式配置
@@ -517,8 +523,10 @@
 
 ## 近期最小任务
 
-阶段 1 到阶段 8.6 的最小调试闭环已经形成。Bloom sigma、Bloom level count 和光源类型开关已经具备运行时参数入口。下一步可以进入阶段 9 的上层渲染能力。
+阶段 1 到阶段 8.6 的最小调试闭环已经形成。Bloom sigma、Bloom level count 和光源类型开关已经具备运行时参数入口。阶段 9.1 的基础调试绘制能力也已具备。
 
-- 阶段 9.2：补 sprite 旋转、翻转、pivot/origin、tint/alpha 等绘制参数
-- 阶段 9.3：补渐变矩形、渐变贴图和多色顶点
-- 阶段 9 后续：再评估九宫格、文字、资源管理器和 ECS 渲染系统
+渲染路线当前先收口，不继续扩展上层 sprite API：
+
+- 暂缓阶段 9.2：sprite 旋转、翻转、pivot/origin、tint/alpha 等绘制参数
+- 暂缓阶段 9.3：渐变矩形、渐变贴图和多色顶点
+- 下一步优先推进 ECS、资源管理器、SpriteComponent 和场景系统；这些边界确定后，再回到阶段 9.2 设计上层渲染 API
