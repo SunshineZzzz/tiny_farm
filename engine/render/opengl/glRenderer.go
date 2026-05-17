@@ -329,6 +329,52 @@ func (gr *GLRenderer) DrawRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	return gr.scenePass.queueRect(rect, color)
 }
 
+// 绘制一条逻辑坐标系下的纯色线段
+//
+// start 和 end 表示线段中心线的起点和终点
+// thickness 表示线段总宽度，实际绘制时会沿中心线法线方向向两侧各扩展 thickness/2
+// color 表示线段颜色，使用 RGBA，取值范围为 0 到 1
+//
+// 当前实现不使用 OpenGL 线宽，而是把线段展开成四边形后加入场景批处理
+func (gr *GLRenderer) DrawLine(start, end mgl32.Vec2, thickness float32, color mgl32.Vec4) error {
+	if gr == nil || gr.scenePass == nil {
+		return errors.New("gl renderer or scene pass is nil")
+	}
+	if thickness <= 0.0 {
+		return errors.New("line thickness is invalid")
+	}
+
+	// 计算线段方向向量
+	delta := end.Sub(start)
+	// 计算线段长度
+	length := delta.Len()
+	// 计算线段半宽度
+	halfThickness := thickness / 2.0
+
+	// 如果线段长度太短了，直接绘制一个矩形
+	if length <= 0.00001 {
+		return gr.DrawRect(mgl32.Vec4{
+			start.X() - halfThickness,
+			start.Y() - halfThickness,
+			thickness,
+			thickness,
+		}, color)
+	}
+
+	// 垂直方向 = 把 delta 转 90 度
+	// 单位法线 = 垂直方向 / length
+	// normal = 单位法线 * halfThickness
+	normal := mgl32.Vec2{-delta.Y(), delta.X()}.Mul(halfThickness / length)
+	// 构造四边形
+	points := [4]mgl32.Vec2{
+		start.Add(normal),
+		end.Add(normal),
+		end.Sub(normal),
+		start.Sub(normal),
+	}
+	return gr.scenePass.queueQuad(points, color)
+}
+
 // 绘制一个逻辑坐标系下的贴图矩形
 //
 // uvRect 按左上原点语义传入，(0,0) 表示纹理左上，(1,1) 表示纹理右下

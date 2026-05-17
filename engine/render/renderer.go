@@ -2,6 +2,7 @@ package render
 
 import (
 	"errors"
+	"math"
 
 	"tiny_farm/engine/render/opengl"
 	emath "tiny_farm/engine/utils/math"
@@ -278,6 +279,144 @@ func (r *Renderer) DrawWorldRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	return r.backend.DrawRect(logicalRect, color)
 }
 
+// 绘制逻辑坐标系下的纯色线段
+func (r *Renderer) DrawLine(start, end mgl32.Vec2, thickness float32, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if thickness <= 0.0 {
+		return nil
+	}
+	return r.backend.DrawLine(start, end, thickness, color)
+}
+
+// 绘制世界坐标系下的纯色线段
+func (r *Renderer) DrawWorldLine(start, end mgl32.Vec2, thickness float32, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if thickness <= 0.0 {
+		return nil
+	}
+	if r.viewportClippingEnabled && r.shouldCullWorldLine(start, end, thickness) {
+		return nil
+	}
+	logicalStart := start
+	logicalEnd := end
+	logicalThickness := thickness
+	if r.currentCamera != nil {
+		logicalStart = r.currentCamera.WorldToLogical(start)
+		logicalEnd = r.currentCamera.WorldToLogical(end)
+		logicalThickness = thickness * r.currentCamera.Zoom()
+	}
+	return r.DrawLine(logicalStart, logicalEnd, logicalThickness, color)
+}
+
+// 绘制逻辑坐标系下的矩形边框
+func (r *Renderer) DrawRectOutline(rect mgl32.Vec4, thickness float32, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if rect.Z() <= 0.0 || rect.W() <= 0.0 || thickness <= 0.0 {
+		return nil
+	}
+	leftTop := mgl32.Vec2{rect.X(), rect.Y()}
+	rightTop := mgl32.Vec2{rect.X() + rect.Z(), rect.Y()}
+	rightBottom := mgl32.Vec2{rect.X() + rect.Z(), rect.Y() + rect.W()}
+	leftBottom := mgl32.Vec2{rect.X(), rect.Y() + rect.W()}
+	if err := r.DrawLine(leftTop, rightTop, thickness, color); err != nil {
+		return err
+	}
+	if err := r.DrawLine(rightTop, rightBottom, thickness, color); err != nil {
+		return err
+	}
+	if err := r.DrawLine(rightBottom, leftBottom, thickness, color); err != nil {
+		return err
+	}
+	return r.DrawLine(leftBottom, leftTop, thickness, color)
+}
+
+// 绘制世界坐标系下的矩形边框
+func (r *Renderer) DrawWorldRectOutline(rect mgl32.Vec4, thickness float32, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if rect.Z() <= 0.0 || rect.W() <= 0.0 || thickness <= 0.0 {
+		return nil
+	}
+	leftTop := mgl32.Vec2{rect.X(), rect.Y()}
+	rightTop := mgl32.Vec2{rect.X() + rect.Z(), rect.Y()}
+	rightBottom := mgl32.Vec2{rect.X() + rect.Z(), rect.Y() + rect.W()}
+	leftBottom := mgl32.Vec2{rect.X(), rect.Y() + rect.W()}
+	if err := r.DrawWorldLine(leftTop, rightTop, thickness, color); err != nil {
+		return err
+	}
+	if err := r.DrawWorldLine(rightTop, rightBottom, thickness, color); err != nil {
+		return err
+	}
+	if err := r.DrawWorldLine(rightBottom, leftBottom, thickness, color); err != nil {
+		return err
+	}
+	return r.DrawWorldLine(leftBottom, leftTop, thickness, color)
+}
+
+// 绘制逻辑坐标系下的圆形边框
+func (r *Renderer) DrawCircleOutline(center mgl32.Vec2, radius float32, thickness float32, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if radius <= 0.0 || thickness <= 0.0 {
+		return nil
+	}
+
+	// 决定圆周拆成多少段
+	segmentCount := circleSegmentCount(radius)
+	// 是每一段跨过多少角度
+	angleStep := math.Pi * 2.0 / float64(segmentCount)
+	// 是圆周上的第一个点，也就是圆心右侧的点
+	prev := center.Add(mgl32.Vec2{radius, 0.0})
+	for i := 1; i <= segmentCount; i++ {
+		angle := angleStep * float64(i)
+		current := center.Add(mgl32.Vec2{
+			float32(math.Cos(angle)) * radius,
+			float32(math.Sin(angle)) * radius,
+		})
+		if err := r.DrawLine(prev, current, thickness, color); err != nil {
+			return err
+		}
+		prev = current
+	}
+	return nil
+}
+
+// 绘制世界坐标系下的圆形边框
+func (r *Renderer) DrawWorldCircleOutline(center mgl32.Vec2, radius float32, thickness float32, color mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if radius <= 0.0 || thickness <= 0.0 {
+		return nil
+	}
+	outerRadius := radius + thickness*0.5
+	if r.viewportClippingEnabled && r.shouldCullWorldRect(mgl32.Vec4{
+		center.X() - outerRadius,
+		center.Y() - outerRadius,
+		outerRadius * 2.0,
+		outerRadius * 2.0,
+	}) {
+		return nil
+	}
+	logicalCenter := center
+	logicalRadius := radius
+	logicalThickness := thickness
+	if r.currentCamera != nil {
+		logicalCenter = r.currentCamera.WorldToLogical(center)
+		logicalRadius = radius * r.currentCamera.Zoom()
+		logicalThickness = thickness * r.currentCamera.Zoom()
+	}
+	return r.DrawCircleOutline(logicalCenter, logicalRadius, logicalThickness, color)
+}
+
 // 绘制逻辑坐标系下的贴图矩形
 //
 // uvRect 按左上原点语义传入，(0,0) 表示纹理左上，(1,1) 表示纹理右下
@@ -545,6 +684,11 @@ func (r *Renderer) CurrentViewRect() (emath.Rect, bool) {
 	return r.currentCamera.ViewRect(), true
 }
 
+// 将 world 坐标系下的矩形转换成 logical 坐标系下的矩形
+//
+// 返回值中的 bool 表示该矩形是否需要继续绘制
+// 当前没有相机时直接把传入矩形当作 logical 矩形使用
+// 启用可见区域裁剪时，完全落在相机视野外的矩形会返回 false
 func (r *Renderer) worldRectToLogical(rect mgl32.Vec4) (mgl32.Vec4, bool) {
 	if r == nil {
 		return mgl32.Vec4{}, false
@@ -561,6 +705,10 @@ func (r *Renderer) worldRectToLogical(rect mgl32.Vec4) (mgl32.Vec4, bool) {
 	return r.currentCamera.worldRectToLogical(rect, r.pixelSnapEnabled), true
 }
 
+// 判断 world 坐标系下的轴对齐矩形是否完全在当前相机视野外
+//
+// rect 使用 x、y、width、height 表示，x 和 y 是左上角坐标
+// 当前只做 AABB 与相机可见矩形的快速相交测试
 func (r *Renderer) shouldCullWorldRect(rect mgl32.Vec4) bool {
 	if r == nil || r.currentCamera == nil {
 		return false
@@ -574,6 +722,42 @@ func (r *Renderer) shouldCullWorldRect(rect mgl32.Vec4) bool {
 		rectMin.X() >= viewMax.X() ||
 		rectMax.Y() <= viewMin.Y() ||
 		rectMin.Y() >= viewMax.Y()
+}
+
+// 判断 world 坐标系下的线段是否完全在当前相机视野外
+//
+// start 和 end 表示线段中心线的起点和终点
+// thickness 表示线段总宽度，裁剪时会用半宽扩展出包围矩形
+// 当前用线段包围矩形复用矩形裁剪逻辑，避免为线段单独做精确相交测试
+func (r *Renderer) shouldCullWorldLine(start, end mgl32.Vec2, thickness float32) bool {
+	if r == nil || r.currentCamera == nil {
+		return false
+	}
+	halfThickness := thickness * 0.5
+	minX := min(start.X(), end.X()) - halfThickness
+	minY := min(start.Y(), end.Y()) - halfThickness
+	maxX := max(start.X(), end.X()) + halfThickness
+	maxY := max(start.Y(), end.Y()) + halfThickness
+	return r.shouldCullWorldRect(mgl32.Vec4{minX, minY, maxX - minX, maxY - minY})
+}
+
+// 根据圆半径估算圆形边框需要拆成多少条线段
+//
+// 当前按圆周长每约 6 个 logical 单位取一个分段
+// 分段数量限制在 24 到 128 之间，避免小圆过粗糙或大圆提交过多线段
+func circleSegmentCount(radius float32) int {
+	const minSegments = 24
+	const maxSegments = 128
+
+	// 2ΠR / 6 = 圆周长每约 6 个 logical 单位取一个分段
+	segmentCount := int((math.Pi * 2.0 * float64(radius)) / 6.0)
+	if segmentCount < minSegments {
+		return minSegments
+	}
+	if segmentCount > maxSegments {
+		return maxSegments
+	}
+	return segmentCount
 }
 
 // 补全点光源绘制参数

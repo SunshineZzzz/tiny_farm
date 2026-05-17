@@ -453,9 +453,48 @@
 
 阶段 9 不阻塞多 pass 主线，等 Scene/Lighting/Emissive/Bloom/Composite/UI 的边界稳定后再推进。
 
-对齐 `copy_source` 的后续能力：
+阶段 9 需要继续拆分，先做不依赖 UI、文字、资源管理器和 ECS 的 Renderer API，再评估更高层系统。
 
-- `Renderer` facade 扩展：线段、矩形边框、圆形、渐变、旋转、翻转、默认绘制参数
+### 阶段 9.1：基础调试绘制 API
+
+目标：
+
+- 对齐 `copy_source` 中 `Renderer::drawLine` 和 `Renderer::drawCircleOutline` 的基础能力
+- 为地图、碰撞、光源范围和调试覆盖层提供可用的世界绘制入口
+- 先不引入填充圆，避免提前依赖默认圆形纹理和资源管理器
+
+当前状态：
+
+- 已提供 `Renderer.DrawLine()` / `DrawWorldLine()`
+- 已提供 `Renderer.DrawRectOutline()` / `DrawWorldRectOutline()`
+- 已提供 `Renderer.DrawCircleOutline()` / `DrawWorldCircleOutline()`
+- `SpriteBatch` 已支持提交纯色任意四边形，线段通过带厚度四边形实现
+
+验收：
+
+- 世界线段随 camera 变换
+- 世界矩形边框和圆形边框支持 viewport clipping
+- 线段、边框和圆形边框统一走 `Renderer` facade，不暴露 OpenGL 细节
+
+### 阶段 9.2：Sprite 绘制参数补齐
+
+目标：
+
+- 对齐 `copy_source` 中 sprite 的旋转、翻转、pivot/origin、tint/alpha 等参数
+- 把当前固定矩形绘制扩展成可表达 TransformOptions / ColorOptions 的绘制入口
+
+### 阶段 9.3：渐变与扩展形状
+
+目标：
+
+- 补渐变矩形和渐变贴图
+- 扩展多色顶点能力
+- 统一线宽和调试形状策略
+
+### 阶段 9 后续暂缓项
+
+这些能力会牵涉资源描述、字体或游戏对象系统，等 9.1 到 9.3 稳定后再推进：
+
 - 九宫格 UI：迁移 `nine_slice.*` 的绘制约定和资源描述
 - 文字渲染：参考 `text_renderer.*`、`docs/text_rendering.md`，引入字体图集、glyph 布局和文字样式配置
 - ECS 渲染系统：接入 Transform/Sprite/Render 三组件、layer/depth 排序、YSort、InvisibleTag 过滤
@@ -480,4 +519,6 @@
 
 阶段 1 到阶段 8.6 的最小调试闭环已经形成。Bloom sigma、Bloom level count 和光源类型开关已经具备运行时参数入口。下一步可以进入阶段 9 的上层渲染能力。
 
-- 阶段 9：在 pass 边界稳定后，再补线段、九宫格、文字、ECS 渲染和资源管理
+- 阶段 9.2：补 sprite 旋转、翻转、pivot/origin、tint/alpha 等绘制参数
+- 阶段 9.3：补渐变矩形、渐变贴图和多色顶点
+- 阶段 9 后续：再评估九宫格、文字、资源管理器和 ECS 渲染系统

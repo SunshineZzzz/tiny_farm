@@ -67,6 +67,14 @@ func (p *scenePass) queueRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	return p.batch.queueRect(rect, color)
 }
 
+// 将纯色四边形加入场景队列
+func (p *scenePass) queueQuad(points [4]mgl32.Vec2, color mgl32.Vec4) error {
+	if p == nil || p.batch == nil {
+		return errors.New("scene pass is nil")
+	}
+	return p.batch.queueQuad(points, color)
+}
+
 // 将贴图矩形加入场景队列
 func (p *scenePass) queueTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
 	if p == nil || p.batch == nil {

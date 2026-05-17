@@ -187,6 +187,10 @@ func (a *GameApp) render() {
 		slog.Error("draw demo emissive rect failed", slog.Any("err", err))
 	}
 
+	a.renderer.DrawWorldRectOutline(mgl32.Vec4{32.0, 32.0, 96.0, 64.0}, 2.0, mgl32.Vec4{1.0, 0.95, 0.45, 1.0})
+	a.renderer.DrawWorldLine(mgl32.Vec2{24.0, 148.0}, mgl32.Vec2{164.0, 116.0}, 1.0, mgl32.Vec4{0.15, 0.95, 0.55, 1.0})
+	a.renderer.DrawWorldCircleOutline(mgl32.Vec2{184.0, 132.0}, 18.0, 3.0, mgl32.Vec4{0.0, 1.0, 0.2, 1.0})
+
 	a.renderer.Present()
 }
 

@@ -13,8 +13,8 @@ import (
 // 当前阶段先支持位置、缩放和可见区域换算
 // 位置语义与参考实现一致，表示相机中心点的世界坐标
 type Camera struct {
-	// 相机中心点的世界坐标
-	// 约定：相机中心这个世界点，要映射到逻辑画布中心这个逻辑点。
+	// 相机中心点在世界坐标系中的位置
+	// 该世界点会映射到逻辑画布中心
 	position mgl32.Vec2
 	// 逻辑分辨率
 	logicalSize mgl32.Vec2
@@ -121,7 +121,11 @@ func (c *Camera) ViewRect() emath.Rect {
 	}
 }
 
-// 将世界矩形转换成逻辑矩形
+// 将 world 坐标系下的矩形转换成 logical 坐标系下的矩形
+//
+// rect 使用 x、y、width、height 表示，x 和 y 是左上角坐标
+// 矩形位置通过相机中心点和缩放转换，矩形尺寸只乘以相机缩放
+// pixelSnap 开启时会把转换后的坐标和尺寸四舍五入到整数 logical 像素
 func (c *Camera) worldRectToLogical(rect mgl32.Vec4, pixelSnap bool) mgl32.Vec4 {
 	logicalPos := c.WorldToLogical(mgl32.Vec2{rect.X(), rect.Y()})
 	logicalSize := mgl32.Vec2{rect.Z() * c.zoom, rect.W() * c.zoom}

@@ -197,6 +197,54 @@ func (b *spriteBatch) queueRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	return b.queueSprite(0, false, rect, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}, color)
 }
 
+// 将纯色四边形加入本帧批处理队列
+func (b *spriteBatch) queueQuad(points [4]mgl32.Vec2, color mgl32.Vec4) error {
+	if b == nil || b.glCtx == nil {
+		return errors.New("sprite batch is nil")
+	}
+
+	spriteCount := len(b.vertices) / (spriteVertexCount * spriteVertexFloatCount)
+	if err := b.ensureCapacity(spriteCount + 1); err != nil {
+		return err
+	}
+
+	baseIndex := uint32(len(b.vertices) / spriteVertexFloatCount)
+	uv := [4]mgl32.Vec2{
+		{0.0, 0.0},
+		{1.0, 0.0},
+		{1.0, 1.0},
+		{0.0, 1.0},
+	}
+	for i, point := range points {
+		b.vertices = append(b.vertices,
+			point.X(), point.Y(),
+			uv[i].X(), uv[i].Y(),
+			color.X(), color.Y(), color.Z(), color.W(),
+		)
+	}
+
+	indexFrom := uint32(len(b.indices))
+	b.indices = append(b.indices,
+		baseIndex+0, baseIndex+1, baseIndex+2,
+		baseIndex+2, baseIndex+3, baseIndex+0,
+	)
+	if len(b.commands) > 0 {
+		last := &b.commands[len(b.commands)-1]
+		if last.texture == 0 && !last.useTexture {
+			last.indexCount += spriteIndexCount
+			return nil
+		}
+	}
+	b.commands = append(b.commands, spriteCommand{
+		texture:    0,
+		indexFrom:  indexFrom,
+		indexCount: spriteIndexCount,
+		useTexture: false,
+	})
+
+	return nil
+}
+
 // 将贴图矩形加入本帧批处理队列
 func (b *spriteBatch) queueTexture(texture *Texture, rect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if texture == nil || texture.id == 0 {
