@@ -3,8 +3,10 @@ package resource
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"tiny_farm/engine/render"
+	"tiny_farm/engine/utils"
 
 	"github.com/go-gl/mathgl/mgl32"
 )
@@ -122,4 +124,32 @@ func (m *textureManager) clearTextures() {
 		m.unloadTexture(key)
 	}
 	m.textures = make(map[ResourceKey]*textureEntry)
+}
+
+// 返回按 key 排序的纹理调试信息
+func (m *textureManager) textureDebugInfo() []TextureDebugInfo {
+	if m == nil || len(m.textures) == 0 {
+		return nil
+	}
+
+	keys := make([]ResourceKey, 0, len(m.textures))
+	for key, entry := range m.textures {
+		if entry == nil {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+
+	info := make([]TextureDebugInfo, 0, len(keys))
+	for _, key := range keys {
+		entry := m.textures[key]
+		info = append(info, TextureDebugInfo{
+			Key:         key,
+			SourcePath:  entry.sourcePath,
+			Size:        entry.size,
+			MemoryBytes: utils.EstimateTextureMemoryBytes(entry.size),
+		})
+	}
+	return info
 }

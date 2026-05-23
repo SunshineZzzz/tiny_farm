@@ -83,3 +83,11 @@ func (m *ResourceManager) UnloadTexture(key ResourceKey) {
 	}
 	m.textures.unloadTexture(key)
 }
+
+// 返回按 key 排序的纹理调试信息
+func (m *ResourceManager) TextureDebugInfo() []TextureDebugInfo {
+	if m == nil || m.textures == nil {
+		return nil
+	}
+	return m.textures.textureDebugInfo()
+}

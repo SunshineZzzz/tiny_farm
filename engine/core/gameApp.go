@@ -419,6 +419,7 @@ func (a *GameApp) initResourceManager() error {
 	a.resourceManager = manager
 	a.demoTexture = demoTexture
 	slog.Debug("resource manager init success")
+	slog.Debug("resource texture debug info", slog.Any("textures", manager.TextureDebugInfo()))
 	return nil
 }
 

@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/draw"
 	"unsafe"
+
+	"github.com/go-gl/mathgl/mgl32"
 )
 
 // 把 float32 切片作为字节切片
@@ -63,4 +65,14 @@ func ImageToNRGBA(img image.Image, flipY bool) *image.NRGBA {
 	}
 
 	return dst
+}
+
+// 按当前纹理上传格式估算内存占用
+func EstimateTextureMemoryBytes(size mgl32.Vec2) int {
+	width := int(size.X())
+	height := int(size.Y())
+	if width <= 0 || height <= 0 {
+		return 0
+	}
+	return width * height * 4
 }
