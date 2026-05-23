@@ -34,6 +34,23 @@ type Texture struct {
 	backend *opengl.Texture
 }
 
+// 返回纹理像素尺寸
+func (t *Texture) Size() mgl32.Vec2 {
+	if t == nil || t.backend == nil {
+		return mgl32.Vec2{}
+	}
+	return t.backend.Size()
+}
+
+// 释放纹理资源
+func (t *Texture) Close() {
+	if t == nil || t.backend == nil {
+		return
+	}
+	t.backend.Close()
+	t.backend = nil
+}
+
 // 渲染器上一帧统计
 type RenderStats = opengl.RenderStats
 
@@ -678,15 +695,6 @@ func (r *Renderer) Close() {
 	r.backend.Close()
 	r.backend = nil
 	r.currentCamera = nil
-}
-
-// 释放纹理资源
-func (t *Texture) Close() {
-	if t == nil || t.backend == nil {
-		return
-	}
-	t.backend.Close()
-	t.backend = nil
 }
 
 // 返回当前相机可见的世界区域

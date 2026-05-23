@@ -9,6 +9,7 @@ import (
 	ectx "tiny_farm/engine/context"
 	"tiny_farm/engine/input"
 	"tiny_farm/engine/render"
+	"tiny_farm/engine/resource"
 	"tiny_farm/engine/utils/dispatch"
 	"tiny_farm/engine/utils/event"
 
@@ -33,6 +34,8 @@ type GameApp struct {
 	sdlInitialized bool
 	// 管理当前 SDL 窗口和 OpenGL 上下文
 	renderer *render.Renderer
+	// 统一管理资源加载、缓存和释放
+	resourceManager *resource.ResourceManager
 	// 当前帧使用的世界相机
 	camera *render.Camera
 	// 阶段 4 用于验证贴图绘制的临时纹理
@@ -254,6 +257,10 @@ func (a *GameApp) init() error {
 		return err
 	}
 
+	if err := a.initResourceManager(); err != nil {
+		return err
+	}
+
 	if err := a.initInputManager(); err != nil {
 		return err
 	}
@@ -387,13 +394,31 @@ func (a *GameApp) initGLRenderer() error {
 	// a.renderer.SetAmbientLightColor(mgl32.Vec4{0.0, 0.0, 0.0, 1.0})
 	// 低亮度暖灰环境光，适合作为黄昏默认底光，只抬暗部，不明显改变整体色调
 	a.renderer.SetAmbientLightColor(mgl32.Vec4{0.10, 0.085, 0.075, 1.0})
-	demoTexture, err := a.renderer.LoadTexture("assets/tests/Button Normal.png")
+	slog.Debug("open gl renderer success", slog.Any("logicalSize", logicalSize))
+	slog.Debug("render debug textures", slog.Any("textures", a.renderer.DebugTextures()))
+	return nil
+}
+
+// 初始化资源管理器并加载启动阶段资源
+func (a *GameApp) initResourceManager() error {
+	manager, err := resource.NewResourceManager(a.renderer)
 	if err != nil {
 		return err
 	}
+	if err := manager.LoadResources("assets/data/resource_mapping.json"); err != nil {
+		manager.Clear()
+		return err
+	}
+
+	demoTexture, err := manager.GetTexture(resource.ResourceKey("Button Normal.png"), "assets/tests/Button Normal.png")
+	if err != nil {
+		manager.Clear()
+		return err
+	}
+
+	a.resourceManager = manager
 	a.demoTexture = demoTexture
-	slog.Debug("open gl renderer success", slog.Any("logicalSize", logicalSize))
-	slog.Debug("render debug textures", slog.Any("textures", a.renderer.DebugTextures()))
+	slog.Debug("resource manager init success")
 	return nil
 }
 
@@ -424,9 +449,11 @@ func (a *GameApp) close() {
 
 	a.inputManager = nil
 
-	if a.demoTexture != nil {
-		a.demoTexture.Close()
-		a.demoTexture = nil
+	a.demoTexture = nil
+
+	if a.resourceManager != nil {
+		a.resourceManager.Clear()
+		a.resourceManager = nil
 	}
 
 	if a.renderer != nil {
