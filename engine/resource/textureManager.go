@@ -6,7 +6,6 @@ import (
 	"slices"
 
 	"tiny_farm/engine/render"
-	"tiny_farm/engine/utils"
 
 	"github.com/go-gl/mathgl/mgl32"
 )
@@ -74,20 +73,6 @@ func (m *textureManager) loadTexture(key ResourceKey, paths ...string) (*render.
 	return texture, nil
 }
 
-// 获取已加载纹理
-//
-// 当前只查询缓存，不把 key 当作路径隐式加载
-func (m *textureManager) getTexture(key ResourceKey) (*render.Texture, bool) {
-	if m == nil {
-		return nil, false
-	}
-	entry, ok := m.textures[key]
-	if !ok || entry == nil || entry.texture == nil {
-		return nil, false
-	}
-	return entry.texture, true
-}
-
 // 返回已加载纹理的像素尺寸
 func (m *textureManager) textureSize(key ResourceKey) (mgl32.Vec2, bool) {
 	if m == nil {
@@ -148,8 +133,18 @@ func (m *textureManager) textureDebugInfo() []TextureDebugInfo {
 			Key:         key,
 			SourcePath:  entry.sourcePath,
 			Size:        entry.size,
-			MemoryBytes: utils.EstimateTextureMemoryBytes(entry.size),
+			MemoryBytes: estimateTextureMemoryBytes(entry.size),
 		})
 	}
 	return info
+}
+
+// 按当前纹理上传格式估算内存占用
+func estimateTextureMemoryBytes(size mgl32.Vec2) int {
+	width := int(size.X())
+	height := int(size.Y())
+	if width <= 0 || height <= 0 {
+		return 0
+	}
+	return width * height * 4
 }

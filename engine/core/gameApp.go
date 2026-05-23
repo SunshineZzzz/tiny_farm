@@ -410,7 +410,7 @@ func (a *GameApp) initResourceManager() error {
 		return err
 	}
 
-	demoTexture, err := manager.GetTexture(resource.ResourceKey("Button Normal.png"), "assets/tests/Button Normal.png")
+	demoTexture, err := manager.LoadTexture(resource.ResourceKey("Button Normal.png"), "assets/tests/Button Normal.png")
 	if err != nil {
 		manager.Clear()
 		return err
@@ -420,6 +420,8 @@ func (a *GameApp) initResourceManager() error {
 	a.demoTexture = demoTexture
 	slog.Debug("resource manager init success")
 	slog.Debug("resource texture debug info", slog.Any("textures", manager.TextureDebugInfo()))
+	slog.Debug("resource sound debug info", slog.Any("sounds", manager.SoundDebugInfo()))
+	slog.Debug("resource music debug info", slog.Any("music", manager.MusicDebugInfo()))
 	return nil
 }
 
