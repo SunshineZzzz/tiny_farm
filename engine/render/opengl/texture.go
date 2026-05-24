@@ -15,6 +15,18 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 )
 
+// 纹理采样过滤方式
+//
+// 当前用于区分普通像素风贴图和后续字体 atlas 这类动态纹理
+type TextureFilter uint32
+
+const (
+	// 最近邻采样，适合像素风资源
+	TextureFilterNearest TextureFilter = gl.NEAREST
+	// 线性采样，适合需要柔和边缘的动态纹理
+	TextureFilterLinear TextureFilter = gl.LINEAR
+)
+
 // OpenGL 纹理资源
 //
 // 当前阶段只保存最小绘制所需的句柄和像素尺寸，资源生命周期由创建它的 GLRenderer 管理
@@ -56,6 +68,31 @@ func (t *Texture) Close() {
 	t.id = 0
 	t.width = 0
 	t.height = 0
+}
+
+// 更新纹理指定区域的 RGBA 像素
+//
+// 当前用于后续字体 atlas 按 glyph 增量写入，pixels 必须是 width*height*4 字节
+func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error {
+	if t == nil || t.glCtx == nil || t.id == 0 {
+		return errors.New("texture is nil")
+	}
+	if width <= 0 || height <= 0 {
+		return errors.New("update texture size is invalid")
+	}
+	if x < 0 || y < 0 || x+width > t.width || y+height > t.height {
+		return errors.New("update texture region is out of bounds")
+	}
+	expectedBytes := int(width) * int(height) * 4
+	if len(pixels) != expectedBytes {
+		return fmt.Errorf("update texture pixels length is invalid: got %d, want %d", len(pixels), expectedBytes)
+	}
+
+	t.glCtx.BindTexture(gl.TEXTURE_2D, t.id)
+	t.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
+	t.glCtx.TexSubImage2D(gl.TEXTURE_2D, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+	t.glCtx.BindTexture(gl.TEXTURE_2D, 0)
+	return nil
 }
 
 // 从图像文件创建 OpenGL texture
@@ -117,6 +154,50 @@ func newTexture(glCtx gl.Context, path string) (*Texture, error) {
 		height: height,
 		path:   path,
 	}, nil
+}
+
+// 创建一张空 RGBA OpenGL texture
+//
+// 当前主要服务后续字体 atlas，调用方负责在不再使用时 Close
+func newEmptyTexture(glCtx gl.Context, width, height int32, filter TextureFilter) (*Texture, error) {
+	if glCtx == nil {
+		return nil, errors.New("gl context is nil")
+	}
+	if width <= 0 || height <= 0 {
+		return nil, errors.New("texture size is invalid")
+	}
+
+	textureID := glCtx.CreateTexture()
+	if textureID == 0 {
+		return nil, fmt.Errorf("create texture failed,%v", glCtx.GetError())
+	}
+
+	glCtx.BindTexture(gl.TEXTURE_2D, textureID)
+	resolvedFilter := normalizeTextureFilter(filter)
+	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, int32(resolvedFilter))
+	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, int32(resolvedFilter))
+	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	glCtx.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
+	glCtx.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+	glCtx.BindTexture(gl.TEXTURE_2D, 0)
+
+	return &Texture{
+		glCtx:  glCtx,
+		id:     textureID,
+		width:  width,
+		height: height,
+	}, nil
+}
+
+// 补全纹理过滤方式，未知值回退到最近邻采样
+func normalizeTextureFilter(filter TextureFilter) TextureFilter {
+	switch filter {
+	case TextureFilterNearest, TextureFilterLinear:
+		return filter
+	default:
+		return TextureFilterNearest
+	}
 }
 
 // 将像素源矩形转换成 UV 矩形

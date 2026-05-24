@@ -34,6 +34,16 @@ type Texture struct {
 	backend *opengl.Texture
 }
 
+// 纹理采样过滤方式
+type TextureFilter = opengl.TextureFilter
+
+const (
+	// 最近邻采样，适合像素风资源
+	TextureFilterNearest = opengl.TextureFilterNearest
+	// 线性采样，适合字体 atlas 等需要柔和边缘的动态纹理
+	TextureFilterLinear = opengl.TextureFilterLinear
+)
+
 // 返回纹理像素尺寸
 func (t *Texture) Size() mgl32.Vec2 {
 	if t == nil || t.backend == nil {
@@ -49,6 +59,16 @@ func (t *Texture) Close() {
 	}
 	t.backend.Close()
 	t.backend = nil
+}
+
+// 更新纹理指定区域的 RGBA 像素
+//
+// pixels 必须是 width*height*4 字节，坐标使用纹理左上角为原点
+func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error {
+	if t == nil || t.backend == nil {
+		return errors.New("texture is nil")
+	}
+	return t.backend.UpdateRGBA(x, y, width, height, pixels)
 }
 
 // 渲染器上一帧统计
@@ -609,6 +629,20 @@ func (r *Renderer) LoadTexture(path string) (*Texture, error) {
 		return nil, errors.New("renderer is nil")
 	}
 	texture, err := r.backend.LoadTexture(path)
+	if err != nil {
+		return nil, err
+	}
+	return &Texture{backend: texture}, nil
+}
+
+// 创建一张空白可绘制纹理
+//
+// 当前用于后续字体 atlas 这类运行时写入纹理
+func (r *Renderer) CreateEmptyTexture(width, height int32, filter TextureFilter) (*Texture, error) {
+	if r == nil || r.backend == nil {
+		return nil, errors.New("renderer is nil")
+	}
+	texture, err := r.backend.CreateEmptyTexture(width, height, filter)
 	if err != nil {
 		return nil, err
 	}

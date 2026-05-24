@@ -472,6 +472,17 @@ func (gr *GLRenderer) LoadTexture(path string) (*Texture, error) {
 	return newTexture(gr.renderCtx.glContext, path)
 }
 
+// 创建一张空白可绘制纹理
+//
+// 当前用于后续字体 atlas 这类运行时写入纹理
+func (gr *GLRenderer) CreateEmptyTexture(width, height int32, filter TextureFilter) (*Texture, error) {
+	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
+		return nil, errors.New("gl renderer context is nil")
+	}
+
+	return newEmptyTexture(gr.renderCtx.glContext, width, height, filter)
+}
+
 // 交换窗口前后缓冲，提交本帧画面
 func (gr *GLRenderer) Present() error {
 	if gr == nil || gr.renderCtx == nil {
