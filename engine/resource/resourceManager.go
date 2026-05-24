@@ -11,12 +11,14 @@ import (
 
 // 对外提供统一资源访问入口
 //
-// 当前阶段接入纹理和音频缓存，字体和地图等类型后续继续挂在这一层下面
+// 当前阶段接入纹理、音频和字体缓存，地图等类型后续继续挂在这一层下面
 type ResourceManager struct {
 	// 负责纹理加载、查询和释放
 	textures *textureManager
 	// 负责音效和音乐解码缓存
 	audio *audioManager
+	// 负责字体文件和字号缓存
+	fonts *fontManager
 }
 
 // 创建资源管理器
@@ -30,6 +32,7 @@ func NewResourceManager(renderer *render.Renderer) (*ResourceManager, error) {
 	return &ResourceManager{
 		textures: textureManager,
 		audio:    newAudioManager(),
+		fonts:    newFontManager(),
 	}, nil
 }
 
@@ -70,6 +73,9 @@ func (m *ResourceManager) Clear() {
 	}
 	if m.audio != nil {
 		m.audio.clear()
+	}
+	if m.fonts != nil {
+		m.fonts.clearFonts()
 	}
 	if m.textures != nil {
 		m.textures.clearTextures()
@@ -122,6 +128,30 @@ func (m *ResourceManager) MusicDebugInfo() []AudioDebugInfo {
 		return nil
 	}
 	return m.audio.musicDebugInfo()
+}
+
+// 加载字体资源，如果命中缓存则直接返回已有字体
+func (m *ResourceManager) LoadFont(key ResourceKey, path string, pixelSize int) (*Font, error) {
+	if m == nil || m.fonts == nil {
+		return nil, errors.New("resource manager font manager is nil")
+	}
+	return m.fonts.loadFont(key, path, pixelSize)
+}
+
+// 卸载指定字体资源
+func (m *ResourceManager) UnloadFont(key ResourceKey, pixelSize int) {
+	if m == nil || m.fonts == nil {
+		return
+	}
+	m.fonts.unloadFont(key, pixelSize)
+}
+
+// 返回按 key 和字号排序的字体调试信息
+func (m *ResourceManager) FontDebugInfo() []FontDebugInfo {
+	if m == nil || m.fonts == nil {
+		return nil
+	}
+	return m.fonts.fontDebugInfo()
 }
 
 // 加载音效资源，如果命中缓存则直接返回已有 buffer

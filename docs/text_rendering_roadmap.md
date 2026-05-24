@@ -116,6 +116,8 @@ func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error
 
 目标是建立字体资源层，按字体 key 和字号缓存字体对象。
 
+当前状态：已完成字体文件级缓存、`ResourceManager` facade 接入和字体调试信息。glyph 缓存、字体度量解析和 atlas 纹理生命周期仍留到后续阶段。
+
 建议新增文件：
 
 - `engine/resource/fontManager.go`
