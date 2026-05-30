@@ -70,7 +70,7 @@ func (t *Texture) Close() {
 	t.height = 0
 }
 
-// 更新纹理指定区域的 RGBA 像素
+// 更新纹理指定区域的 RGBA 像素，x 和 y 使用左上原点语义
 //
 // 当前用于后续字体 atlas 按 glyph 增量写入，pixels 必须是 width*height*4 字节
 func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error {
@@ -88,9 +88,15 @@ func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error {
 		return fmt.Errorf("update texture pixels length is invalid: got %d, want %d", len(pixels), expectedBytes)
 	}
 
+	// 纹理高512，把一块高16的glyph写到离顶部1像素的地方，也就是y=1
+	// 图片像素往往按照左上方为(0，0)坐标点组织数据，OpenGL按照左下方为(0，0)，必须反转y轴
+	// 那OpenGL里对应的yoffset应该是
+	uploadY := t.height - y - height
+	uploadPixels := flipRGBARows(pixels, int(width), int(height))
+
 	t.glCtx.BindTexture(gl.TEXTURE_2D, t.id)
 	t.glCtx.PixelStorei(gl.UNPACK_ALIGNMENT, 1)
-	t.glCtx.TexSubImage2D(gl.TEXTURE_2D, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+	t.glCtx.TexSubImage2D(gl.TEXTURE_2D, 0, x, uploadY, width, height, gl.RGBA, gl.UNSIGNED_BYTE, uploadPixels)
 	t.glCtx.BindTexture(gl.TEXTURE_2D, 0)
 	return nil
 }
@@ -198,6 +204,22 @@ func normalizeTextureFilter(filter TextureFilter) TextureFilter {
 	default:
 		return TextureFilterNearest
 	}
+}
+
+// 将左上原点的 RGBA 行数据翻成 OpenGL 上传需要的左下原点顺序
+func flipRGBARows(pixels []byte, width, height int) []byte {
+	if height <= 1 {
+		return pixels
+	}
+
+	rowSize := width * 4
+	flipped := make([]byte, len(pixels))
+	for y := range height {
+		srcOffset := y * rowSize
+		dstOffset := (height - 1 - y) * rowSize
+		copy(flipped[dstOffset:dstOffset+rowSize], pixels[srcOffset:srcOffset+rowSize])
+	}
+	return flipped
 }
 
 // 将像素源矩形转换成 UV 矩形

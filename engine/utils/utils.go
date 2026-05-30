@@ -25,6 +25,8 @@ func Uint32Bytes(values []uint32) []byte {
 }
 
 // 将任意 image.Image 转成紧凑 RGBA 像素数组
+// flipY 是否垂直翻转，true 表示翻转
+// 图片像素往往按照左上方为(0，0)坐标点组织数据，OpenGL按照左下方为(0，0)，必须反转y轴
 func ImageToNRGBA(img image.Image, flipY bool) *image.NRGBA {
 	// 1. 如果本身就是紧凑的 NRGBA 且不需要翻转，直接返回
 	if rgba, ok := img.(*image.NRGBA); ok && !flipY && rgba.Stride == rgba.Rect.Dx()*4 {

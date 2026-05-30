@@ -196,6 +196,31 @@ func (a *GameApp) render() {
 	a.renderer.DrawWorldLine(mgl32.Vec2{24.0, 148.0}, mgl32.Vec2{164.0, 116.0}, 1.0, mgl32.Vec4{0.15, 0.95, 0.55, 1.0})
 	a.renderer.DrawWorldCircleOutline(mgl32.Vec2{184.0, 132.0}, 18.0, 3.0, mgl32.Vec4{0.0, 1.0, 0.2, 1.0})
 
+	if err := a.renderer.DrawUIRect(mgl32.Vec4{8.0, 24.0, 184.0, 34.0}, mgl32.Vec4{0.02, 0.02, 0.025, 0.92}); err != nil {
+		slog.Error("draw demo text background failed", slog.Any("err", err))
+	}
+	params := &render.TextRenderParams{
+		Color: mgl32.Vec4{1.0, 0.96, 0.36, 1.0},
+		Shadow: &render.ShadowOptions{
+			Enabled: true,
+			Offset:  mgl32.Vec2{2.0, 2.0},
+			Color:   mgl32.Vec4{0.0, 0.0, 0.0, 1.0},
+		},
+		Layout: &render.LayoutOptions{
+			GlyphScale: mgl32.Vec2{1.0, 1.0},
+		},
+	}
+	if err := a.textRenderer.DrawUIText(
+		"Text Renderer Demo",
+		resource.ResourceKey("ui/demo-font"),
+		24,
+		mgl32.Vec2{12.0, 28.0},
+		render.FontPath("assets/fonts/VonwaonBitmap-16px.ttf"),
+		params,
+	); err != nil {
+		slog.Error("draw demo ui text failed", slog.Any("err", err))
+	}
+
 	a.renderer.Present()
 }
 
