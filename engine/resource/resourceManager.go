@@ -32,7 +32,7 @@ func NewResourceManager(renderer *render.Renderer) (*ResourceManager, error) {
 	return &ResourceManager{
 		textures: textureManager,
 		audio:    newAudioManager(),
-		fonts:    newFontManager(),
+		fonts:    newFontManager(renderer),
 	}, nil
 }
 

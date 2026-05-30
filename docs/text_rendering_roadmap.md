@@ -174,6 +174,8 @@ type Font struct {
 
 目标是把单个 rune 或 glyph index 转成可绘制的 `FontGlyph`。
 
+当前状态：已完成 rune 级 glyph 光栅化、glyph cache、atlas page 行分配、atlas 子区域上传和字体 debug info 统计。当前仍未接入 HarfBuzz，后续可将缓存键从 rune 扩展到 shaping 输出的 glyph index。
+
 参考 `copy_source` 的 atlas 策略：
 
 - 每个 `Font` 持有多个 atlas page
