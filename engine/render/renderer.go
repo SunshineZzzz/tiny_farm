@@ -471,17 +471,27 @@ func (r *Renderer) DrawWorldCircleOutline(center mgl32.Vec2, radius float32, thi
 //
 // uvRect 按左上原点语义传入，(0,0) 表示纹理左上，(1,1) 表示纹理右下
 func (r *Renderer) DrawTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+	return r.DrawTextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+}
+
+// 绘制带颜色调制的逻辑坐标系贴图矩形
+func (r *Renderer) DrawTextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
 	if texture == nil || texture.backend == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawTexture(texture.backend, dstRect, uvRect)
+	return r.backend.DrawTextureColor(texture.backend, dstRect, uvRect, color)
 }
 
 // 绘制世界坐标系下的贴图矩形
 func (r *Renderer) DrawWorldTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+	return r.DrawWorldTextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+}
+
+// 绘制带颜色调制的世界坐标系贴图矩形
+func (r *Renderer) DrawWorldTextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
@@ -492,7 +502,7 @@ func (r *Renderer) DrawWorldTexture(texture *Texture, dstRect mgl32.Vec4, uvRect
 	if !ok {
 		return nil
 	}
-	return r.backend.DrawTexture(texture.backend, logicalRect, uvRect)
+	return r.backend.DrawTextureColor(texture.backend, logicalRect, uvRect, color)
 }
 
 // 绘制逻辑坐标系下的贴图源矩形
@@ -516,13 +526,18 @@ func (r *Renderer) DrawUIRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 
 // 绘制 UI 逻辑坐标系下的贴图矩形
 func (r *Renderer) DrawUITexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+	return r.DrawUITextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+}
+
+// 绘制带颜色调制的 UI 逻辑坐标系贴图矩形
+func (r *Renderer) DrawUITextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
 	if texture == nil || texture.backend == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawUITexture(texture.backend, dstRect, uvRect)
+	return r.backend.DrawUITextureColor(texture.backend, dstRect, uvRect, color)
 }
 
 // 绘制 UI 逻辑坐标系下的贴图源矩形

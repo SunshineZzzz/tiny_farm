@@ -121,7 +121,10 @@ func (p *compositePass) render(viewport emath.Rect, input compositePassInput) er
 		return errors.New("composite bloom texture is nil")
 	}
 
+	// 绑定的是 默认帧缓冲，也就是OpenGL当前上下文关联的窗口后缓冲区
+	// 它的尺寸通常等于 窗口drawable size / framebuffer size，不是一定等于SDL的窗口逻辑大小
 	p.glCtx.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	// 接下来NDC坐标[-1,1]最终映射到窗口的哪个像素区域
 	p.glCtx.Viewport(
 		int32(viewport.Position.X()),
 		int32(viewport.Position.Y()),

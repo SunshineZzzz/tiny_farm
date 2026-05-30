@@ -206,9 +206,11 @@ type Font struct {
 
 目标是提供文本测量和绘制 API。
 
+当前状态：已完成资源层 `TextRenderer`、文本测量、UI/World 文本绘制、颜色调制、阴影、多行、字距、行距缩放和 glyph 缩放。当前仍按 rune 顺序布局，未接入 HarfBuzz shaping。
+
 建议新增：
 
-- `engine/render/textRenderer.go`
+- `engine/resource/textRenderer.go`
 
 核心类型：
 

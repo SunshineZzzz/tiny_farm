@@ -36,6 +36,8 @@ type GameApp struct {
 	renderer *render.Renderer
 	// 统一管理资源加载、缓存和释放
 	resourceManager *resource.ResourceManager
+	// 负责文本测量和绘制
+	textRenderer *render.TextRenderer
 	// 当前帧使用的世界相机
 	camera *render.Camera
 	// 阶段 4 用于验证贴图绘制的临时纹理
@@ -261,6 +263,10 @@ func (a *GameApp) init() error {
 		return err
 	}
 
+	if err := a.initTextRenderer(); err != nil {
+		return err
+	}
+
 	if err := a.initInputManager(); err != nil {
 		return err
 	}
@@ -422,6 +428,17 @@ func (a *GameApp) initResourceManager() error {
 	slog.Debug("resource texture debug info", slog.Any("textures", manager.TextureDebugInfo()))
 	slog.Debug("resource sound debug info", slog.Any("sounds", manager.SoundDebugInfo()))
 	slog.Debug("resource music debug info", slog.Any("music", manager.MusicDebugInfo()))
+	return nil
+}
+
+// 初始化文本渲染器
+func (a *GameApp) initTextRenderer() error {
+	textRenderer, err := render.NewTextRenderer(a.resourceManager, a.renderer)
+	if err != nil {
+		return err
+	}
+	a.textRenderer = textRenderer
+	slog.Debug("text renderer init success")
 	return nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 
+	"tiny_farm/engine/abstract"
 	"tiny_farm/engine/render"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -31,7 +32,7 @@ type fontKey struct {
 
 // 字符光栅化后写入atlas的缓存条目
 //
-// 当前按 rune 缓存，后续接入 HarfBuzz 后可扩展为 glyph index 缓存
+// 当前按 rune 缓存，后续接入 typesetting 后可扩展为 glyph index 缓存
 type FontGlyph struct {
 	// glyph所在atlas纹理
 	texture *render.Texture
@@ -43,6 +44,54 @@ type FontGlyph struct {
 	Advance float32
 	// glyph在atlas纹理中的UV范围，左上原点语义
 	UVRect mgl32.Vec4
+}
+
+// 确保FontGlyph实现IFontGlyph接口
+var _ abstract.IFontGlyph = (*FontGlyph)(nil)
+
+// 返回glyph所在的atlas纹理
+func (g *FontGlyph) Texture() *render.Texture {
+	if g == nil {
+		return nil
+	}
+	return g.texture
+}
+
+// 返回 glyph 所在纹理对象
+func (g *FontGlyph) GlyphTexture() any {
+	return g.Texture()
+}
+
+// 返回 glyph 像素尺寸
+func (g *FontGlyph) GlyphSize() mgl32.Vec2 {
+	if g == nil {
+		return mgl32.Vec2{}
+	}
+	return g.Size
+}
+
+// 返回 glyph 相对基线原点的偏移
+func (g *FontGlyph) GlyphBearing() mgl32.Vec2 {
+	if g == nil {
+		return mgl32.Vec2{}
+	}
+	return g.Bearing
+}
+
+// 返回绘制后光标前进距离，单位像素
+func (g *FontGlyph) GlyphAdvance() float32 {
+	if g == nil {
+		return 0
+	}
+	return g.Advance
+}
+
+// 返回 glyph 在 atlas 纹理中的 UV 范围
+func (g *FontGlyph) GlyphUVRect() mgl32.Vec4 {
+	if g == nil {
+		return mgl32.Vec4{}
+	}
+	return g.UVRect
 }
 
 // 字体atlas页
@@ -90,6 +139,9 @@ type Font struct {
 	// atlas页的尺寸
 	atlasPageSize int32
 }
+
+// 确保Font实现IFont接口
+var _ abstract.IFont = (*Font)(nil)
 
 // 返回字体资源语义 key
 func (f *Font) Key() ResourceKey {
@@ -199,6 +251,11 @@ func (f *Font) Glyph(r rune) (*FontGlyph, error) {
 	return glyph, nil
 }
 
+// 按需获取 rune 对应的文本渲染 glyph
+func (f *Font) TextGlyph(r rune) (abstract.IFontGlyph, error) {
+	return f.Glyph(r)
+}
+
 // 释放字体持有的 atlas 纹理
 func (f *Font) close() {
 	if f == nil {
@@ -299,7 +356,7 @@ func newFontManager(renderer *render.Renderer) *fontManager {
 // 加载字体并按 key 与字号缓存
 //
 // 如果同一 key 和字号已经加载，直接返回缓存实例
-func (m *fontManager) loadFont(key ResourceKey, path string, pixelSize int) (*Font, error) {
+func (m *fontManager) loadFont(key ResourceKey, pixelSize int, paths ...string) (*Font, error) {
 	if m == nil {
 		return nil, errors.New("font manager is nil")
 	}
@@ -309,15 +366,16 @@ func (m *fontManager) loadFont(key ResourceKey, path string, pixelSize int) (*Fo
 	if pixelSize <= 0 {
 		return nil, errors.New("font pixel size is invalid")
 	}
-	if path == "" {
-		return nil, errors.New("font path is empty")
-	}
 
 	fontKey := fontKey{key: key, pixelSize: pixelSize}
 	if font, ok := m.fonts[fontKey]; ok && font != nil {
 		return font, nil
 	}
 
+	path := string(key)
+	if len(paths) != 0 {
+		path = paths[0]
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("load font %q from %q: %w", key, path, err)

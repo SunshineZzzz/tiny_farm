@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"tiny_farm/engine/abstract"
 	"tiny_farm/engine/render"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -20,6 +21,9 @@ type ResourceManager struct {
 	// 负责字体文件和字号缓存
 	fonts *fontManager
 }
+
+// 确保ResourceManager实现IResourceManager接口
+var _ abstract.IResourceManager = (*ResourceManager)(nil)
 
 // 创建资源管理器
 //
@@ -131,11 +135,11 @@ func (m *ResourceManager) MusicDebugInfo() []AudioDebugInfo {
 }
 
 // 加载字体资源，如果命中缓存则直接返回已有字体
-func (m *ResourceManager) LoadFont(key ResourceKey, path string, pixelSize int) (*Font, error) {
+func (m *ResourceManager) LoadFont(key ResourceKey, pixelSize int, paths ...string) (abstract.IFont, error) {
 	if m == nil || m.fonts == nil {
 		return nil, errors.New("resource manager font manager is nil")
 	}
-	return m.fonts.loadFont(key, path, pixelSize)
+	return m.fonts.loadFont(key, pixelSize, paths...)
 }
 
 // 卸载指定字体资源
