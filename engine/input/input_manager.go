@@ -358,6 +358,8 @@ func (m *InputManager) updateActionState(actionID ActionID, isActive bool, isRep
 		return
 	}
 
+	// 如果从未按下却收到松开事件（比如 ImGui 捕获了按下事件但没捕获松开事件，或者窗口焦点切换），
+	// 就跳过 RELEASED 状态，避免产生一次"幽灵释放"
 	if state != Inactive {
 		m.actionStates[actionID] = Released
 	}
