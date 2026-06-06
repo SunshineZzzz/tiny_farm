@@ -1,41 +1,28 @@
-# 字体与文本渲染实施路线
+# 字体与文本渲染路线图
 
-## 目标
+## 对齐目标
 
-当前 Go 版本需要在已有 2D OpenGL 渲染管线之上补齐字体与文本渲染能力。目标不是一次性完整搬运 `copy_source/TinyFarm` 的 C++ 实现，而是先建立一个可验证的文本显示闭环，再逐步扩展到字体缓存、glyph atlas、文本样式、布局缓存和复杂文本整形。
+本文档只对齐 `copy_source/TinyFarm` 的文本渲染主线，不把 UI 组件体系、按钮文字等能力提前纳入当前阶段
 
-最终数据流：
+`copy_source` 的文本系统边界是：
 
 ```text
-UTF-8 文本
-  -> FontManager 加载字体和 glyph
-  -> glyph atlas 纹理
-  -> TextRenderer 生成布局
-  -> Renderer.DrawUIText / DrawWorldText
-  -> 复用当前 UI pass / world pass 绘制
+ResourceManager
+  -> FontManager 管理 Font、glyph cache、glyph atlas
+  -> TextRenderer 通过 HarfBuzz 生成 glyph layout
+  -> GLRenderer 绘制 UI/world glyph 贴图
 ```
 
-核心边界：
+Go 版当前目标不是一次性完整搬运 C++ 版本，而是按同一边界逐步补齐：
 
-- `FontManager` 负责字体文件、字号、glyph 缓存和 glyph atlas 生命周期
-- `TextRenderer` 负责文本测量、布局缓存、样式解析和 UI/world 文本绘制
-- `ResourceManager` 是字体资源的统一入口，上层不直接管理字体对象
-- `Renderer` 继续负责“怎么画”，文本系统只把 glyph 转成贴图矩形提交给它
-- 第一版先支持基础 UTF-8 文本显示，复杂 shaping、双向文本和连字后续再做
+- `FontManager` 负责字体资源、glyph 光栅化、glyph atlas 生命周期
+- `TextRenderer` 负责文本测量、布局缓存、样式解析、UI/world 文本绘制
+- `ResourceManager` 是字体资源统一入口
+- `Renderer` 只负责提交 texture rect，不关心文本语义
 
-## 当前状态
+## copy_source 实际能力
 
-- `assets/fonts/VonwaonBitmap-16px.ttf` 已存在可用字体资源
-- `engine/render/opengl/spriteBatch.go` 已支持贴图矩形批处理和 per-vertex color
-- `engine/render/opengl/uiPass.go` 已支持独立 UI pass
-- `engine/render/renderer.go` 已提供 `DrawTexture`、`DrawWorldTexture`、`DrawUITexture`
-- `engine/resource/resourceManager.go` 已管理 texture、sound、music，但尚未接入 font
-- `engine/render/opengl/texture.go` 已支持从图片文件创建纹理，也已支持创建空白 RGBA 纹理和更新子区域
-- Go 侧尚无字体解析、glyph 位图生成、glyph atlas、文本布局和文本样式配置
-
-## 参考范围
-
-优先参考这些文件：
+参考文件：
 
 - `copy_source/TinyFarm/docs/text_rendering.md`
 - `copy_source/TinyFarm/config/text_render.json`
@@ -43,490 +30,452 @@ UTF-8 文本
 - `copy_source/TinyFarm/src/engine/resource/font_manager.cpp`
 - `copy_source/TinyFarm/src/engine/render/text_renderer.h`
 - `copy_source/TinyFarm/src/engine/render/text_renderer.cpp`
-- `copy_source/TinyFarm/src/engine/ui/ui_label.*`
-- `copy_source/TinyFarm/src/engine/debug/panels/text_renderer_debug_panel.*`
-- `engine/resource/resourceManager.go`
+- `copy_source/TinyFarm/src/engine/utils/defs.h`
+
+参考实现已经具备：
+
+- `FontManager` 按 `(font_id, pixel_size)` 缓存字体
+- `Font` 封装 `FT_Face`、`hb_font_t`、字体度量、glyph cache、atlas pages
+- `FontGlyph` 记录 texture、size、bearing、advance、uv_rect
+- glyph cache 的 key 是 HarfBuzz 输出的 glyph index，不是 rune
+- `TextRenderer` 使用 HarfBuzz 对 UTF-8 执行 shaping
+- `TextLayout` 保存 `font`、`size`、`glyphs`、`line_count`、`usage_frame`
+- `LayoutKey` 包含 `font_id`、`font_size`、`text`、`layout_options`
+- `layout_cache_` 有容量限制和 LRU 风格裁剪
+- 字体卸载或清空时，TextRenderer 监听事件并清理布局缓存
+- `config/text_render.json` 支持 direction、language、features、layout_cache_capacity、styles
+- 文本样式支持 color、shadow、layout
+- 默认 UI/world style
+- `layout_revision` 用于外部知道样式或布局相关配置已变化
+- `drawUIText` 走 UI pass，`drawText` 走 world pass
+
+参考实现当前 `LayoutOptions` 只有：
+
+```cpp
+float letter_spacing;
+float line_spacing_scale;
+glm::vec2 glyph_scale;
+```
+
+因此以下能力不属于当前 copy_source 文本主线：
+
+- UI Label/Button text 集成
+
+这些以后可以作为 UI 系统能力另开阶段，但不放进当前对齐路线
+
+copy_source 当前存在局部业务层换行：
+
+- `ItemTooltipUI::wrapText` 按像素宽度测量并插入换行
+- `DialogueBubble::onShowEvent` 按字符数做简单换行，源码注释已标明 CJK/混排可能溢出
+
+这类换行不是 `TextRenderer` 的通用 `LayoutOptions` 能力，因此不纳入本文档的文本渲染主线
+
+## Go 当前已完成
+
+当前 Go 代码中已经存在：
+
+### 1. OpenGL 动态纹理能力
+
+已完成：
+
+- `Renderer.CreateEmptyTexture`
+- `Texture.UpdateRGBA`
+- atlas 子区域上传
+- 动态纹理上传使用左上原点语义并转换到 OpenGL 上传坐标
+- `Texture.Close` 可释放 atlas texture
+
+对应文件：
+
 - `engine/render/renderer.go`
 - `engine/render/opengl/texture.go`
-- `engine/render/opengl/spriteBatch.go`
 
-暂缓完整迁移：
+### 2. ResourceManager 接入 FontManager
 
-- HarfBuzz shaping 的完整能力
-- FreeType C 绑定
-- Text debug panel
-- UI label / button 的完整组件体系
-- 对话系统、tooltip、HUD 等游戏 UI 文本
+已完成：
 
-## copy_source 文本能力盘点
+- `ResourceManager` 持有 `fonts *fontManager`
+- `NewResourceManager(renderer, dispatcher...)` 初始化字体管理器并可选接入资源事件
+- `LoadFont(key, pixelSize, paths...)`
+- `FontDebugInfo`
+- `Clear()` 清理字体缓存
 
-`copy_source/TinyFarm` 的文本系统可以概括为：
-
-```text
-FontManager 负责把 glyph 变成可采样 atlas
-TextRenderer 负责把 UTF-8 文本变成 glyph 布局并画到屏幕
-```
-
-核心能力：
-
-- `FontManager` 按 `(font_id, pixel_size)` 缓存 `Font`
-- `Font` 封装 `FT_Face`、`hb_font_t`、字体度量、glyph cache 和 atlas pages
-- `FontGlyph` 保存 glyph 所在纹理页、尺寸、bearing、advance 和 UV
-- `TextRenderer` 使用 HarfBuzz 把 UTF-8 文本整形成 glyph 序列
-- `TextRenderer` 按 `(font_id, font_size, text, layout_options)` 缓存布局
-- UI 文本走 `drawUITexture`，世界文本走 `drawTexture`
-- `config/text_render.json` 管理默认方向、语言、HarfBuzz feature、样式、阴影和布局参数
-- 字体卸载或清空时，`TextRenderer` 清理布局缓存，避免引用失效
-
-Go 版迁移时应保留这些边界，但第一版可以弱化 shaping：
-
-- 先按 rune 顺序布局，支持中文和英文基础显示
-- 后续再接 HarfBuzz 或等价 shaping 库处理复杂文本
-
-## 阶段 1：OpenGL atlas 纹理能力
-
-目标是让字体系统能创建空白 atlas，并把 glyph 位图写入指定区域。
-
-当前状态：已完成底层能力，后续 `FontManager` 可以通过 `Renderer.CreateEmptyTexture` 创建 atlas，并通过 `Texture.UpdateRGBA` 写入 glyph 像素。
-
-要做：
-
-- 在 `engine/render/opengl/texture.go` 增加从内存创建 texture 的内部能力
-- 支持创建空 RGBA texture，尺寸由字体 atlas 决定
-- 支持 `TexSubImage2D` 更新 atlas 子区域
-- atlas 纹理建议使用 `LINEAR` 或按像素字体需求可配置为 `NEAREST`
-- 保持 `CLAMP_TO_EDGE`
-- 不向 game 层暴露 OpenGL texture ID
-
-建议接口边界：
-
-```go
-func newEmptyTexture(glCtx gl.Context, width, height int32, filter uint32) (*Texture, error)
-func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error
-```
-
-验收：
-
-- 能创建一张空 atlas 纹理
-- 能向 atlas 指定区域上传 RGBA 像素
-- `Texture.Close()` 能正确释放 atlas 纹理
-- `go test ./...` 通过
-
-## 阶段 2：FontManager 与字体缓存
-
-目标是建立字体资源层，按字体 key 和字号缓存字体对象。
-
-当前状态：已完成字体文件级缓存、`ResourceManager` facade 接入和字体调试信息。glyph 缓存、字体度量解析和 atlas 纹理生命周期仍留到后续阶段。
-
-建议新增文件：
-
-- `engine/resource/fontManager.go`
-- `engine/resource/fontDebugInfo.go`
-
-核心类型：
-
-```go
-type FontKey struct {
-    Key  ResourceKey
-    Size int
-}
-
-type FontGlyph struct {
-    Texture *render.Texture
-    Size    mgl32.Vec2
-    Bearing mgl32.Vec2
-    Advance float32
-    UVRect  mgl32.Vec4
-}
-
-type Font struct {
-    key        ResourceKey
-    pixelSize  int
-    ascender   float32
-    descender  float32
-    lineHeight float32
-}
-```
-
-要做：
-
-- `FontManager` 内部持有 `map[FontKey]*Font`
-- `LoadFont(key, path, pixelSize)` 命中缓存时直接返回
-- `GetFont(key, pixelSize)` 只查缓存，不隐式把 key 当路径
-- `UnloadFont(key, pixelSize)` 释放该字号的 atlas 纹理
-- `ClearFonts()` 释放全部字体缓存
-- `ResourceManager.Clear()` 时一并清理字体
-
-字体解析方案：
-
-- 第一版优先使用 Go 库解析 TTF，避免立刻引入 FreeType/HarfBuzz C 依赖
-- 可选方向是 `golang.org/x/image/font/sfnt` 或等价 Go 字体库
-- 如果第一版库不能覆盖中文 glyph 渲染，再评估 FreeType 绑定
-
-验收：
-
-- 同一个 key 和字号重复加载不会创建第二个 `Font`
-- 不同字号分别缓存
-- 卸载和清空会释放 atlas 资源
-- 字体加载失败返回明确错误，不 panic
-
-## 阶段 3：glyph 获取、缓存与 atlas 分配
-
-目标是把单个 rune 或 glyph index 转成可绘制的 `FontGlyph`。
-
-当前状态：已完成 rune 级 glyph 光栅化、glyph cache、atlas page 行分配、atlas 子区域上传和字体 debug info 统计。当前仍未接入 HarfBuzz，后续可将缓存键从 rune 扩展到 shaping 输出的 glyph index。
-
-参考 `copy_source` 的 atlas 策略：
-
-- 每个 `Font` 持有多个 atlas page
-- 小字号可用 512x512
-- 中等字号可用 1024x1024
-- 大字号可用 2048x2048
-- atlas 按行分配区域，每个 glyph 周围保留 1 像素 padding
-
-要做：
-
-- `Font` 内部维护 glyph cache
-- 缓存键第一版可用 `rune`
-- glyph 缓存未命中时渲染 glyph 位图
-- 将灰度 glyph 位图转换成 RGBA，RGB 为白色，A 为 glyph alpha
-- 把 RGBA 数据上传到 atlas
-- 记录 `UVRect`、`Size`、`Bearing`、`Advance`
-- 对缺失 glyph 使用替换字符或 `?` 兜底
-
-验收：
-
-- 能加载 ASCII 字符 glyph
-- 能加载中文字符 glyph
-- 重复绘制同一字符不重复写入 atlas
-- atlas 空间不足时能创建新 page
-- glyph debug info 能看到 glyph 数和 atlas page 数
-
-## 阶段 4：TextRenderer 最小闭环
-
-目标是提供文本测量和绘制 API。
-
-当前状态：已完成资源层 `TextRenderer`、文本测量、UI/World 文本绘制、颜色调制、阴影、多行、字距、行距缩放和 glyph 缩放。当前仍按 rune 顺序布局，未接入 HarfBuzz shaping。
-
-建议新增：
-
-- `engine/resource/textRenderer.go`
-
-核心类型：
-
-```go
-type LayoutOptions struct {
-    LetterSpacing    float32
-    LineSpacingScale float32
-    GlyphScale       mgl32.Vec2
-}
-
-type ShadowOptions struct {
-    Enabled bool
-    Offset  mgl32.Vec2
-    Color   mgl32.Vec4
-}
-
-type TextRenderParams struct {
-    Color  mgl32.Vec4
-    Shadow ShadowOptions
-    Layout LayoutOptions
-}
-```
-
-要做：
-
-- `MeasureText(text, fontKey, size, options)` 返回文本尺寸
-- `DrawUIText(text, fontKey, size, position, params)` 绘制 UI 文本
-- `DrawWorldText(text, fontKey, size, position, params)` 绘制世界文本
-- 支持 `\n` 多行
-- 支持颜色
-- 支持阴影
-- 支持字距、行距缩放、glyph 缩放
-- 第一版按 rune 顺序布局，不做 HarfBuzz shaping
-
-基础布局公式：
-
-```text
-baselineY = ascender + lineIndex * lineHeight * lineSpacingScale
-destX = penX + bearingX
-destY = baselineY - bearingY
-penX += advance + letterSpacing
-```
-
-验收：
-
-- 能显示英文
-- 能显示中文
-- 能显示多行文本
-- UI 文本坐标不受 camera 影响
-- 世界文本坐标受 camera 影响，并支持 viewport clipping
-
-## 阶段 5：ResourceManager 接入
-
-目标是让字体加载和查询统一挂在资源层下。
-
-修改：
+对应文件：
 
 - `engine/resource/resourceManager.go`
+- `engine/resource/fontManager.go`
 - `engine/resource/debugInfo.go`
+- `engine/abstract/abstract.go`
 
-要做：
+### 3. Go 版 Font / FontGlyph / glyph atlas
 
-- `ResourceManager` 增加 `fonts *fontManager`
-- `NewResourceManager(renderer)` 初始化字体管理器
-- 增加 `LoadFont`
-- 增加 `GetFont`
-- 增加 `UnloadFont`
-- 增加 `FontDebugInfo`
-- `Clear()` 清理字体缓存
-- 后续 `assets/data/resource_mapping.json` 可扩展 `font` section
+已完成：
 
-建议接口：
+- 使用 Go 字体库解析 TTF
+- 按 `key + pixelSize` 缓存字体
+- 保存 ascender、descender、lineHeight、pixelSize
+- rune 级 glyph cache
+- glyph 位图转 RGBA
+- atlas page 行分配
+- atlas 空间不足时创建新 page
+- `GlyphTexture`、`GlyphSize`、`GlyphBearing`、`GlyphAdvance`、`GlyphUVRect`
+- 缺字时 fallback 到 `?`
 
-```go
-func (m *ResourceManager) LoadFont(key ResourceKey, path string, size int) (*render.Font, error)
-func (m *ResourceManager) GetFont(key ResourceKey, size int) (*render.Font, bool)
-func (m *ResourceManager) UnloadFont(key ResourceKey, size int)
-func (m *ResourceManager) FontDebugInfo() []FontDebugInfo
-```
+与 copy_source 差异：
 
-实际类型归属可在实现时调整：字体对象若依赖渲染纹理，建议资源层持有内部字体类型，`TextRenderer` 通过资源层读取。
+- Go 当前是 `rune -> glyph`
+- copy_source 是 HarfBuzz shaping 后的 `glyph_index -> glyph`
+- Go 当前没有 `hb_font_t`
+- Go 当前没有 FreeType C 绑定
 
-验收：
+### 4. TextRenderer 最小闭环
 
-- 应用启动可预加载默认字体
-- 资源清理时字体 atlas 被释放
-- debug info 能展示字体 key、字号、glyph 数、atlas 页和估算内存
+已完成：
 
-## 阶段 6：文本样式配置
-
-目标是对齐 `copy_source/TinyFarm/config/text_render.json` 的样式配置，但第一版只实现已使用字段。
-
-新增：
-
+- `NewTextRenderer(resourceManager, renderer, dispatcher...)`
+- `MeasureText`
+- `DrawUIText`
+- `DrawWorldText`
+- `TextLayout`
+- `GlyphPlacement`
+- `LayoutKey`
+- `layout_cache`
+- `layout_cache_capacity`
+- `usage_frame`
+- 超容量时移除最久未使用 layout
 - `config/text_render.json`
-- `engine/render/textRenderConfig.go`
+- `TextRenderer.loadConfig`
+- 内建 `ui/default` 和 `world/default`
+- `default_style_keys`
+- styles 中的 color、shadow、layout
+- 样式或布局配置变更时递增 `layout_revision`
+- `TextStyleKey`
+- `TextRenderOverrides`
+- `SetTextStyle`
+- `GetTextStyle`
+- `HasTextStyle`
+- `ListTextStyleKeys`
+- `DefaultUIStyleKey`
+- `DefaultWorldStyleKey`
+- `LayoutRevision`
+- 颜色调制
+- `ColorOptions`
+- 渐变颜色 `start_color` / `end_color` / `use_gradient` / `angle_radians`
+- 阴影
+- 多行 `\n`
+- `LetterSpacing`
+- `LineSpacingScale`
+- `GlyphScale`
+- UI/world 坐标通路区分
+- demo 中可渲染基础 UI 文本
 
-建议第一版配置：
+对应文件：
 
-```json
-{
-  "text_renderer": {
-    "layout_cache_capacity": 256,
-    "default_style_keys": {
-      "ui": "ui/default",
-      "world": "world/default"
-    },
-    "styles": {
-      "ui/default": {
-        "color": "#FFFFFFFF",
-        "shadow": {
-          "enabled": true,
-          "offset": [1.0, 1.0],
-          "color": "#000000FF"
-        },
-        "layout": {
-          "letter_spacing": 0.0,
-          "line_spacing_scale": 1.0,
-          "glyph_scale": [1.0, 1.0]
-        }
-      },
-      "world/default": {
-        "color": "#FFFFFFFF",
-        "shadow": {
-          "enabled": true,
-          "offset": [1.0, 1.0],
-          "color": "#000000FF"
-        },
-        "layout": {
-          "letter_spacing": 0.0,
-          "line_spacing_scale": 1.0,
-          "glyph_scale": [1.0, 1.0]
-        }
-      }
-    }
-  }
-}
-```
+- `engine/render/textRenderer.go`
+- `engine/core/gameApp.go`
 
-保留但暂不生效：
+与 copy_source 差异：
 
-- `direction`
-- `language`
-- `features`
+- Go 当前可从调用参数里的 style key 获取样式
+- Go 当前 `DrawUIText` 可携带 `FontPath` 并隐式加载字体
+- copy_source 的 `drawTextInternal` 不携带 `font_path`，通常先通过 `getTextSize(..., font_path)` 或资源层预加载字体
+- Go 当前布局缓存保存 HarfBuzz shaping 后的 glyph index 布局
 
-这些字段等 HarfBuzz shaping 阶段再启用。
+## Go 当前未实现
 
-验收：
+以下是 copy_source 已有、Go 还未实现或未完整实现的能力，后续应按优先级补齐：
 
-- 缺失配置时使用内建默认样式
-- 配置解析错误返回明确错误
-- 样式变更能影响新绘制文本
-- 配置解析有测试覆盖
+### 1. HarfBuzz shaping
 
-## 阶段 7：布局缓存
+已完成：
 
-目标是避免每帧重复计算稳定文本的 glyph placement。
+- 使用 `github.com/go-text/typesetting/harfbuzz` 作为 Go 侧 HarfBuzz 等价实现
+- `Font` 持有 HarfBuzz font 等价对象
+- `TextRenderer` 解析 direction / language / features
+- `shapeLine` 按 HarfBuzz 输出的 glyph index 和 position 生成布局
+- 布局使用 x_advance / y_advance
+- 布局使用 x_offset / y_offset
+- kerning、ligature、复杂脚本、RTL 等能力交给 HarfBuzz shaping 结果处理
 
-参考 `copy_source` 的 `TextLayout`：
+参考：
 
-```go
-type GlyphPlacement struct {
-    Glyph    *FontGlyph
-    DestRect mgl32.Vec4
-}
+- `Font::getHBFont`
+- `Font::getGlyphByIndex`
+- `TextRenderer::shapeLine`
 
-type TextLayout struct {
-    Size       mgl32.Vec2
-    Glyphs     []GlyphPlacement
-    LineCount  int
-    UsageFrame uint64
-}
-```
+### 2. glyph index 级 FontGlyph
 
-缓存键包含：
+已完成：
 
-- font key
-- font size
-- text
-- letter spacing
-- line spacing scale
-- glyph scale
+- 根据 glyph index 加载 glyph
+- glyph cache key 从 rune 切到 glyph index
+- HarfBuzz 输出 glyph id 后查询 atlas glyph
+
+参考：
+
+- `Font::getGlyphByIndex`
+- `Font::loadGlyph(uint32_t glyph_index)`
+
+### 3. 渐变颜色
+
+已完成：
+
+- `ColorOptions`
+- `start_color`
+- `end_color`
+- `use_gradient`
+- `angle_radians`
+- sprite batch 按四角投影生成顶点渐变色
+- `TextRenderer` 绘制 glyph 时传递颜色参数
+
+### 4. Debug panel
+
+未实现：
+
+- Text debug panel
+- style 实时编辑
+- layout_revision 展示
+- layout cache 状态展示
+
+参考：
+
+- `src/engine/debug/panels/text_renderer_debug_panel.*`
+
+当前 Go 可以先不做 Debug UI，因为 Go 侧 UI 系统还没开始
+
+## 明确暂不做
+
+以下 copy_source 已有能力不在当前 TextRenderer 对齐路线中：
+
+- UI Label
+- UIButton text
+- tooltip 局部 word wrap
+- dialogue bubble 简单换行
+
+这些不是 copy_source 当前 `TextRenderer` 主线的 `LayoutOptions` 能力。等 UI 系统推进到对应阶段再做
+
+## 后续实施路线
+
+### 阶段 A：整理当前最小闭环
+
+目标：确认当前已提交实现只保留 copy_source 主线中的基础能力
 
 要做：
 
-- `TextRenderer` 内部维护 layout cache
-- 配置 `layout_cache_capacity`
-- 命中缓存时刷新 `UsageFrame`
-- 超出容量时移除最久未使用布局
-- 字体卸载、字体清空、样式布局参数变化时清缓存
+- 保持 `LayoutOptions` 只包含 `LetterSpacing`、`LineSpacingScale`、`GlyphScale`
+- 保持 `LayoutOptions` 边界不扩展到 UI 组件能力
+- 保留 demo 只用于验证基础文字渲染
+- 不引入 UI Label / UIButton text / 业务层换行
+
+验收：
+
+- `go test ./...`
+- `go build .`
+- demo 能看到 UI 文本
+
+### 阶段 B：Layout cache
+
+目标：先对齐 copy_source 的布局缓存，不引入 shaping
+
+已完成：
+
+- 在 `TextRenderer` 内增加内部 `TextLayout`
+- 增加 `GlyphPlacement`
+- 增加 `LayoutKey`
+- 缓存 key 包含 `fontKey`、`pixelSize`、`text`、`LayoutOptions`
+- `MeasureText` 和 `DrawText` 共用 layout cache
+- 增加 `layout_cache_capacity`
+- 增加 `usage_frame`
+- 超容量时移除最久未使用 layout
 
 验收：
 
 - 重复测量同一文本命中缓存
-- 样式布局参数变化后不会复用旧布局
-- 缓存容量限制有效
-- `go test ./...` 通过
+- layout 参数变化不复用旧缓存
+- 容量限制生效
 
-## 阶段 8：启动链路与演示绘制
+已执行：
 
-目标是在当前客户端中验证文本渲染闭环。
+- `go test ./...`
+- `go build -o $env:TEMP\tiny_farm_check.exe .`
 
-修改：
+### 阶段 C：字体事件与缓存失效
 
-- `engine/core/gameApp.go`
-- `game/entry.go` 或后续场景初始化代码
+目标：对齐 copy_source 的字体生命周期安全
 
-要做：
+已完成：
 
-- 创建 `TextRenderer`
-- 预加载默认字体 `assets/fonts/VonwaonBitmap-16px.ttf`
-- 在 demo 渲染中绘制 UI 文本
-- 绘制世界文本用于验证 camera 变换
-- 绘制中文文本用于验证字体资源
-- 绘制阴影文本用于验证样式
-- 保留现有矩形、贴图、光照演示
-
-建议验证文本：
-
-```text
-Tiny Farm
-字体与文本渲染
-World Label
-Line 1
-Line 2
-```
+- 增加 `FontUnloadedEvent`
+- 增加 `FontsClearedEvent`
+- `ResourceManager.UnloadFont` 时发出单字体卸载事件
+- `ResourceManager.Clear` / `ClearFonts` 时发出字体清空事件
+- `TextRenderer` 监听事件并清理 layout cache
 
 验收：
 
-- `go run .` 能看到 UI 文本和世界文本
-- 窗口缩放时 UI 文本位置稳定
-- camera 变化时世界文本随世界坐标变化
-- 文本绘制不破坏已有 scene、lighting、emissive、bloom、ui pass
+- 卸载字体后不会保留引用旧 glyph 的 layout
+- 清空字体后 layout cache 为空
+- `go test ./...`
 
-## 阶段 9：测试与调试信息
+已执行：
 
-目标是先覆盖不依赖真实 OpenGL 上下文的逻辑，再为 atlas 和绘制保留 smoke test。
+- `go build -o $env:TEMP\tiny_farm_check.exe .`
 
-优先测试：
+当前环境限制：
 
-- 文本配置解析
-- 十六进制颜色解析
-- layout options sanitize
-- layout cache key
-- 多行尺寸计算
-- `FontKey` 缓存逻辑
-- `FontDebugInfo` 排序和字段
-- 字体卸载后布局缓存失效
+- `go test ./...` 在 `engine/resource` 测试包重新编译时会加载 SDL3 动态库
+- 当前机器缺少 `SDL3.dll`，因此测试进程在包初始化阶段失败
 
-调试信息：
+### 阶段 D：text_render.json 与内建样式
 
-- 字体 key
-- 字号
-- 来源路径
-- glyph 数
-- atlas page 数
-- atlas 尺寸
-- 估算内存
+目标：对齐 copy_source 的配置入口和默认样式
 
-验收：
+已完成：
 
-- `go test ./...` 通过
-- `go build .` 通过
-- 运行时可通过日志或 debug info 观察字体缓存增长
+- 新增 `config/text_render.json`
+- `TextRenderer` 增加 `loadConfig`
+- 解析 `layout_cache_capacity`
+- 解析 `default_style_keys`
+- 解析 `styles`
+- 建立内建 `ui/default` 和 `world/default`
+- 样式包含 color、shadow、layout
+- 样式变更时递增 `layout_revision`
 
-## 阶段 10：复杂文本整形
+暂不启用：
 
-目标是在基础文本系统稳定后，再补齐 `copy_source` 的 HarfBuzz 能力。
+- direction
+- language
+- features
 
-适用场景：
-
-- 连字
-- kerning
-- 双向文本
-- 阿拉伯文等复杂脚本
-- 竖排文本
-- 更准确的中文标点排版
-
-要做：
-
-- 评估 Go 侧 HarfBuzz 绑定或 shaping 库
-- 启用 `direction`
-- 启用 `language`
-- 启用 `features`
-- 布局缓存键加入 shaping 相关字段
-- 字形获取从 rune 改为 glyph index
-- 对齐 `copy_source` 的 `shapeLine` 思路
+这些等 HarfBuzz 阶段启用
 
 验收：
 
-- `kern=1` 等 feature 生效
-- 同一文本在不同 direction/language/features 下缓存隔离
-- 基础中文和英文显示不回退
+- 配置缺失时使用内建默认样式
+- 配置错误有明确错误
+- 样式 layout 变化会清 layout cache
 
-## 实施原则
+已执行：
 
-- 第一版先完成“字体文件 -> glyph atlas -> 文本显示”的闭环
-- 不在第一版引入完整 HarfBuzz 和 Debug UI
-- 资源生命周期统一归 `ResourceManager`
-- OpenGL 句柄不暴露给 game 层
-- UI 文本和世界文本明确区分坐标空间
-- glyph atlas 是显存资源，必须有 debug info 和释放路径
-- 修改渲染初始化、资源释放或主循环后运行 `go test ./...`
-- 当前使用的是相对帧率方案，提交说明里不要混淆为绝对时间对齐
+- `go build -o $env:TEMP\tiny_farm_check.exe .`
+- `go test ./engine/utils/dispatch ./engine/utils/event ./engine/abstract ./engine/context`
 
-## 近期最小任务
+当前环境限制：
 
-建议按下面顺序推进：
+- `go test ./...` 在 `engine/resource` 测试包重新编译时会加载 SDL3 动态库
+- 当前机器缺少 `SDL3.dll`，因此测试进程在包初始化阶段失败
 
-1. 在 OpenGL texture 层补空 atlas 创建和子区域上传
-2. 实现 `FontManager` 的字体缓存和清理
-3. 实现单 glyph 加载、atlas 分配和 `FontGlyph`
-4. 实现 `TextRenderer.MeasureText`
-5. 实现 `TextRenderer.DrawUIText`
-6. 实现 `TextRenderer.DrawWorldText`
-7. 接入 `ResourceManager`
-8. 新增 `config/text_render.json`
-9. 在 demo 中绘制中英文 UI 文本和世界文本
-10. 补配置、缓存和资源调试测试
+### 阶段 E：Text style API
+
+目标：对齐 copy_source 的样式访问接口
+
+已完成：
+
+- `SetTextStyle`
+- `GetTextStyle`
+- `HasTextStyle`
+- `ListTextStyleKeys`
+- `DefaultUIStyleKey`
+- `DefaultWorldStyleKey`
+- `LayoutRevision`
+- `TextStyleKey`
+- `TextRenderOverrides`
+- `resolveTextRenderParams`
+
+验收：
+
+- 可通过 style key 绘制 UI/world 文本
+- override 可覆盖颜色、阴影和 glyph scale
+- style 变化可驱动 `layout_revision`
+
+已执行：
+
+- `go build -o $env:TEMP\tiny_farm_check.exe .`
+- `go test ./engine/utils/dispatch ./engine/utils/event ./engine/abstract ./engine/context`
+
+当前环境限制：
+
+- `go test ./...` 在 `engine/resource` 测试包重新编译时会加载 SDL3 动态库
+- 当前机器缺少 `SDL3.dll`，因此测试进程在包初始化阶段失败
+
+### 阶段 F：HarfBuzz shaping 选型与接入
+
+目标：补齐 copy_source 的核心文本整形能力
+
+已完成：
+
+- 选用 `github.com/go-text/typesetting/harfbuzz`
+- `Font` 持有 HarfBuzz font 等价对象
+- `TextRenderer` 增加 direction/language/features
+- `shapeLine` 输出 glyph index 和 position
+- `Font` 支持按 glyph index 取 glyph
+- 从 rune layout 切换到 shaped glyph layout
+
+说明：
+
+- layout cache key 仍按 copy_source 主线保持为 font key、字号、文本和 `LayoutOptions`
+- direction/language/features 变更时清空 layout cache
+
+验收：
+
+- kerning 由 shaping 结果体现
+- ligature 可生效
+- 基础中文、英文显示不回退
+- 不手写 shaping
+
+已执行：
+
+- `go build -o $env:TEMP\tiny_farm_check.exe .`
+- `go test ./engine/utils/dispatch ./engine/utils/event ./engine/abstract ./engine/context ./engine/render`
+
+当前环境限制：
+
+- `go test ./...` 在 `engine/resource` 测试包重新编译时会加载 SDL3 动态库
+- 当前机器缺少 `SDL3.dll`，因此测试进程在包初始化阶段失败
+
+### 阶段 G：Debug 信息增强
+
+目标：先补非 UI 版调试信息，Debug UI 以后做
+
+已完成：
+
+- 输出 layout cache 容量、条目数
+- 输出 layout revision
+- 输出 text styles 列表
+- 字体 debug info 保持 key、字号、glyph 数、atlas page、估算内存
+- `TextRenderer.DebugInfo`
+- 启动时输出 text renderer debug info
+
+验收：
+
+- 可以通过日志或 debug info 判断字体/glyph/layout cache 是否增长
+
+已执行：
+
+- `go test ./engine/render`
+- `go build .`
+
+## 近期优先级
+
+TextRenderer 主线已完成。下一步建议转入 UI 系统阶段：
+
+1. `UILabel`
+2. `UIButton text`
+3. `tooltip/dialogue 局部换行`
+
+继续不建议作为当前 TextRenderer 主线补：
+
+- ellipsis
+- 文本框
+- fallback font chain
+
+这些在 copy_source 自有代码里没有对应的通用实现
+
+## 提交说明要求
+
+涉及这条路线的提交说明应至少写清楚：
+
+- 本次对齐的是 copy_source 的哪个模块
+- 当前是否仍然是 rune 级过渡布局
+- 是否引入 layout cache 或 shaping
+- 实际执行过的命令
+- 当前帧率方案仍是相对帧率方案

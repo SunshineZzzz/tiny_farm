@@ -1,10 +1,12 @@
 package resource
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"os"
 	"slices"
 
@@ -12,9 +14,13 @@ import (
 	"tiny_farm/engine/render"
 
 	"github.com/go-gl/mathgl/mgl32"
-	"golang.org/x/image/font"
+	textfont "github.com/go-text/typesetting/font"
+	"github.com/go-text/typesetting/harfbuzz"
+	xfont "golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
+	"golang.org/x/image/vector"
 )
 
 // 字形图集里，每个glyph四周预留1像素间距
@@ -32,7 +38,7 @@ type fontKey struct {
 
 // 字符光栅化后写入atlas的缓存条目
 //
-// 当前按 rune 缓存，后续接入 typesetting 后可扩展为 glyph index 缓存
+// 当前按 glyph index 缓存，与 HarfBuzz shaping 输出保持同一套索引语义
 type FontGlyph struct {
 	// glyph所在atlas纹理
 	texture *render.Texture
@@ -110,7 +116,7 @@ type fontAtlasPage struct {
 
 // 单个字体资源实例
 //
-// 当前阶段支持按需光栅化rune，并将glyph位图写入atlas
+// 当前阶段支持按需光栅化 glyph index，并将 glyph 位图写入 atlas
 type Font struct {
 	// 字体资源语义 key
 	key ResourceKey
@@ -125,15 +131,25 @@ type Font struct {
 	// 解析后的字体对象
 	parsed *opentype.Font
 	// 指定字号后的字体面
-	face font.Face
+	face xfont.Face
+	// HarfBuzz 使用的字体面
+	shapingFace *textfont.Face
+	// HarfBuzz 使用的字体对象
+	shapingFont *harfbuzz.Font
+	// 复用的 sfnt 临时缓冲
+	sfntBuffer sfnt.Buffer
+	// 复用的 glyph 光栅化器
+	rasterizer vector.Rasterizer
+	// 复用的 glyph alpha mask
+	glyphMask image.Alpha
 	// 字体上升高度，从文字基线baseline向上到字体顶部的大致高度
 	ascender float32
 	// 字体下降深度，从文字基线baseline往下，到字体底部的大致距离
 	descender float32
 	// 字体默认行高，两行文字基线之间的垂直距离，包含字体本身高度(ascent + descent)和行间距(leading)，控制文本行与行的间隔
 	lineHeight float32
-	// 已缓存的glyph
-	glyphs map[rune]*FontGlyph
+	// 已缓存的glyph，key 是字体内部 glyph index
+	glyphs map[uint32]*FontGlyph
 	// atlas页
 	atlasPages []*fontAtlasPage
 	// atlas页的尺寸
@@ -193,32 +209,61 @@ func (f *Font) LineHeight() float32 {
 
 // 按需获取 rune 对应的 glyph atlas 条目
 //
-// 当前是 rune 级光栅化入口，暂不包含 HarfBuzz shaping
+// 当前是兼容旧调用的 rune 入口，内部先映射到字体 glyph index
 func (f *Font) Glyph(r rune) (*FontGlyph, error) {
 	if f == nil {
 		return nil, errors.New("font is nil")
 	}
-	if glyph, ok := f.glyphs[r]; ok && glyph != nil {
-		return glyph, nil
-	}
-	if f.face == nil {
-		return nil, errors.New("font face is nil")
+	if f.parsed == nil {
+		return nil, errors.New("font parsed data is nil")
 	}
 
-	// 从当前的字体文件(f.face)中，把字符(r)的位图(灰度位图遮罩)以及排版度量数据取出来
-	// fixed.Point26_6{}，让字体库以(0,0)作为这个字符的绘制原点，计算它的字形区域、透明度mask和advance值
-	// dr，glyph要画到目标图像上的矩形区域，类型是 type Rectangle struct { Min, Max Point }， 左上角和右下角的坐标
-	// mask，作为alpha蒙版，把颜色填到目标图像上
-	// maskp，在mask这张图里，从哪个坐标开始取字形像素
-	// advance，绘制完这个字符后，笔的位置应该向右移动多少
-	dr, mask, maskp, advance, ok := f.face.Glyph(fixed.Point26_6{}, r)
-	if !ok {
+	index, err := f.parsed.GlyphIndex(&f.sfntBuffer, r)
+	if err != nil || index == 0 {
 		if r != '?' {
 			return f.Glyph('?')
 		}
 		return nil, fmt.Errorf("glyph %q is not available in font %q", r, f.key)
 	}
+	return f.GlyphByIndex(uint32(index))
+}
 
+// 按需获取 glyph index 对应的 glyph atlas 条目
+func (f *Font) GlyphByIndex(index uint32) (*FontGlyph, error) {
+	if f == nil {
+		return nil, errors.New("font is nil")
+	}
+	if glyph, ok := f.glyphs[index]; ok && glyph != nil {
+		return glyph, nil
+	}
+	if f.parsed == nil {
+		return nil, errors.New("font parsed data is nil")
+	}
+	if index > uint32(^sfnt.GlyphIndex(0)) {
+		return nil, fmt.Errorf("glyph index %d is out of range in font %q", index, f.key)
+	}
+
+	glyphIndex := sfnt.GlyphIndex(index)
+	// 将像素字号转换为 fixed.Int26_6，后面的字体度量和光栅化都按照该尺寸进行
+	// ppem 则决定这个坐标基准映射到多少像素：
+	// pixels per em，1 em = 1000 个字体设计单位
+	// ppem = 16，意思是：1000 个字体设计单位 → 16 个像素
+	ppem := fixed.I(f.pixelSize)
+	// 当前字形画完以后，光标应该向右移动多少距离
+	advance, err := f.parsed.GlyphAdvance(&f.sfntBuffer, glyphIndex, ppem, xfont.HintingFull)
+	if err != nil {
+		return nil, fmt.Errorf("load glyph advance %d from font %q: %w", index, f.key, err)
+	}
+	// 光栅化字形，将字体中的矢量轮廓转换为像素遮罩
+	// dr，glyph要画到目标图像上的矩形区域，类型是 type Rectangle struct { Min, Max Point }， 左上角和右下角的坐标
+	// mask，作为alpha蒙版，把颜色填到目标图像上
+	// maskp，在mask这张图里，从哪个坐标开始取字形像素
+	dr, mask, maskp, err := f.rasterizeGlyph(glyphIndex, ppem)
+	if err != nil {
+		return nil, fmt.Errorf("rasterize glyph %d from font %q: %w", index, f.key, err)
+	}
+
+	// 保存字形度量
 	glyph := &FontGlyph{
 		Size: mgl32.Vec2{float32(dr.Dx()), float32(dr.Dy())},
 		// 这里dr.Min.Y用的是image/font这套坐标约定：Y轴向下为正，所以需要取负
@@ -233,7 +278,7 @@ func (f *Font) Glyph(r rune) (*FontGlyph, error) {
 			return nil, err
 		}
 		if err := page.texture.UpdateRGBA(int32(position.X()), int32(position.Y()), int32(dr.Dx()), int32(dr.Dy()), pixels); err != nil {
-			return nil, fmt.Errorf("upload glyph %q to atlas: %w", r, err)
+			return nil, fmt.Errorf("upload glyph %d to atlas: %w", index, err)
 		}
 
 		size := page.texture.Size()
@@ -247,13 +292,26 @@ func (f *Font) Glyph(r rune) (*FontGlyph, error) {
 		}
 	}
 
-	f.glyphs[r] = glyph
+	f.glyphs[index] = glyph
 	return glyph, nil
 }
 
 // 按需获取 rune 对应的文本渲染 glyph
 func (f *Font) TextGlyph(r rune) (abstract.IFontGlyph, error) {
 	return f.Glyph(r)
+}
+
+// 按需获取 glyph index 对应的文本渲染 glyph
+func (f *Font) TextGlyphByIndex(index uint32) (abstract.IFontGlyph, error) {
+	return f.GlyphByIndex(index)
+}
+
+// 返回 HarfBuzz shaping 字体对象
+func (f *Font) TextShapingFont() any {
+	if f == nil {
+		return nil
+	}
+	return f.shapingFont
 }
 
 // 释放字体持有的 atlas 纹理
@@ -273,7 +331,84 @@ func (f *Font) close() {
 	}
 	f.face = nil
 	f.parsed = nil
+	f.shapingFace = nil
+	f.shapingFont = nil
 	f.data = nil
+}
+
+// 根据 glyph index 加载指定 ppem 大小的字形轮廓，然后将矢量轮廓转换成 Alpha mask 和绘制矩形
+//
+// Alpha mask 生成流程参考 golang.org/x/image/font/opentype.Face.Glyph
+// font库只把 rune 版本公开了，没有公开 glyph-index 版本
+func (f *Font) rasterizeGlyph(index sfnt.GlyphIndex, ppem fixed.Int26_6) (image.Rectangle, image.Image, image.Point, error) {
+	// 加载字形轮廓
+	segments, err := f.parsed.LoadGlyph(&f.sfntBuffer, index, ppem, nil)
+	if err != nil {
+		return image.Rectangle{}, nil, image.Point{}, err
+	}
+
+	// 计算字形边界
+	dot := fixed.Point26_6{}
+	bounds := segments.Bounds().Add(dot)
+	dr := image.Rectangle{}
+	// 转换为整数像素矩形
+	dr.Min.X = bounds.Min.X.Floor()
+	dr.Min.Y = bounds.Min.Y.Floor()
+	dr.Max.X = bounds.Max.X.Ceil()
+	dr.Max.Y = bounds.Max.Y.Ceil()
+	width := dr.Dx()
+	height := dr.Dy()
+	if width < 0 || height < 0 {
+		return image.Rectangle{}, nil, image.Point{}, errors.New("glyph bounds is invalid")
+	}
+
+	// 生成alpha mask和绘制矩形
+
+	biasX := dot.X - fixed.Int26_6(dr.Min.X<<6)
+	biasY := dot.Y - fixed.Int26_6(dr.Min.Y<<6)
+	pixelCount := width * height
+	if cap(f.glyphMask.Pix) < pixelCount {
+		f.glyphMask.Pix = make([]byte, pixelCount*2)
+	}
+	f.glyphMask.Pix = f.glyphMask.Pix[:pixelCount]
+	clear(f.glyphMask.Pix)
+	f.glyphMask.Stride = width
+	f.glyphMask.Rect = image.Rect(0, 0, width, height)
+
+	f.rasterizer.Reset(width, height)
+	f.rasterizer.DrawOp = draw.Src
+	for _, segment := range segments {
+		switch segment.Op {
+		case sfnt.SegmentOpMoveTo:
+			f.rasterizer.MoveTo(
+				float32(segment.Args[0].X+biasX)/64.0,
+				float32(segment.Args[0].Y+biasY)/64.0,
+			)
+		case sfnt.SegmentOpLineTo:
+			f.rasterizer.LineTo(
+				float32(segment.Args[0].X+biasX)/64.0,
+				float32(segment.Args[0].Y+biasY)/64.0,
+			)
+		case sfnt.SegmentOpQuadTo:
+			f.rasterizer.QuadTo(
+				float32(segment.Args[0].X+biasX)/64.0,
+				float32(segment.Args[0].Y+biasY)/64.0,
+				float32(segment.Args[1].X+biasX)/64.0,
+				float32(segment.Args[1].Y+biasY)/64.0,
+			)
+		case sfnt.SegmentOpCubeTo:
+			f.rasterizer.CubeTo(
+				float32(segment.Args[0].X+biasX)/64.0,
+				float32(segment.Args[0].Y+biasY)/64.0,
+				float32(segment.Args[1].X+biasX)/64.0,
+				float32(segment.Args[1].Y+biasY)/64.0,
+				float32(segment.Args[2].X+biasX)/64.0,
+				float32(segment.Args[2].Y+biasY)/64.0,
+			)
+		}
+	}
+	f.rasterizer.Draw(&f.glyphMask, f.glyphMask.Bounds(), image.Opaque, image.Point{})
+	return dr, &f.glyphMask, f.glyphMask.Rect.Min, nil
 }
 
 // 给glyph位图分配atlas区域
@@ -387,14 +522,40 @@ func (m *fontManager) loadFont(key ResourceKey, pixelSize int, paths ...string) 
 	if err != nil {
 		return nil, fmt.Errorf("parse font %q from %q: %w", key, path, err)
 	}
+	// 根据已经解析的字体文件，创建一个指定字号和渲染参数的“字体面”
 	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
-		Size:    float64(pixelSize),
-		DPI:     72,
-		Hinting: font.HintingFull,
+		Size: float64(pixelSize),
+		// 每英寸像素数，用于把字体尺寸换算成像素
+		//
+		// point 是物理尺寸：
+		// 1 英寸 = 72 point
+		// 像素取决于屏幕 DPI：
+		// 像素数 = point × DPI / 72
+		// 所以 16 point：
+		// - 72 DPI：16 × 72 / 72 = 16px
+		// - 96 DPI：16 × 96 / 72 ≈ 21.33px
+		// - 144 DPI：16 × 144 / 72 = 32px
+		// 因此，只有在 72 DPI 下，16pt 才等于 16px
+		DPI: 72,
+		// 启用完整 hinting，让较小字号的字形尽量对齐像素网格
+		Hinting: xfont.HintingFull,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create font face %q from %q: %w", key, path, err)
 	}
+	// 创建 HarfBuzz shaping 要使用的字体面
+	shapingFace, err := textfont.ParseTTF(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse shaping font %q from %q: %w", key, path, err)
+	}
+	// 创建 HarfBuzz 字体实例
+	shapingFont := harfbuzz.NewFont(shapingFace)
+	// 设置字号，单位是 point
+	shapingFont.Ptem = float32(pixelSize)
+	// 横向、纵向排版尺寸。乘 64 这是为了与 FreeType 等字体系统的 1/64px 单位保持一致。
+	shapingFont.XScale = int32(pixelSize * 64)
+	shapingFont.YScale = int32(pixelSize * 64)
+	// 获取字体度量信息
 	metrics := face.Metrics()
 
 	font := &Font{
@@ -405,10 +566,12 @@ func (m *fontManager) loadFont(key ResourceKey, pixelSize int, paths ...string) 
 		renderer:      m.renderer,
 		parsed:        parsed,
 		face:          face,
+		shapingFace:   shapingFace,
+		shapingFont:   shapingFont,
 		ascender:      fixedToFloat32(metrics.Ascent),
 		descender:     fixedToFloat32(metrics.Descent),
 		lineHeight:    fixedToFloat32(metrics.Height),
-		glyphs:        make(map[rune]*FontGlyph),
+		glyphs:        make(map[uint32]*FontGlyph),
 		atlasPageSize: calculateAtlasPageSize(pixelSize),
 	}
 	m.fonts[fontKey] = font
@@ -416,28 +579,37 @@ func (m *fontManager) loadFont(key ResourceKey, pixelSize int, paths ...string) 
 }
 
 // 卸载指定字体实例
-func (m *fontManager) unloadFont(key ResourceKey, pixelSize int) {
+//
+// 返回 true 表示确实释放了一个已缓存字体
+func (m *fontManager) unloadFont(key ResourceKey, pixelSize int) bool {
 	if m == nil {
-		return
+		return false
 	}
 	fontKey := fontKey{key: key, pixelSize: pixelSize}
 	if font, ok := m.fonts[fontKey]; ok && font != nil {
 		font.close()
+		delete(m.fonts, fontKey)
+		return true
 	}
 	delete(m.fonts, fontKey)
+	return false
 }
 
 // 清空全部字体缓存
-func (m *fontManager) clearFonts() {
+//
+// 返回 true 表示清理前存在字体缓存
+func (m *fontManager) clearFonts() bool {
 	if m == nil {
-		return
+		return false
 	}
+	hadFonts := len(m.fonts) != 0
 	for _, font := range m.fonts {
 		if font != nil {
 			font.close()
 		}
 	}
 	m.fonts = make(map[fontKey]*Font)
+	return hadFonts
 }
 
 // 返回按 key 和字号排序的字体调试信息
@@ -496,6 +668,11 @@ func calculateAtlasPageSize(pixelSize int) int32 {
 // 3 << 6 = 192
 // 小数部分32放到低6位：
 // 192 + 32 = 224
+// 目的：
+// 让整数也能表示小数像素，比如，字距不一定是整数像素，8.5 像素，但 int32 只能保存整数，不能保存 8.5
+// 所以约定：1 像素 = 64 个小单位，这样 8.5 像素 就能写成整数：8.5 × 64 = 544
+// 程序保存 544，需要转换回像素时：544 ÷ 64 = 8.5 像素
+// 所以乘以 64，就是把“小数像素”放大为整数保存
 func fixedToFloat32(value fixed.Int26_6) float32 {
 	//3.5 => 3 * 2^6 + 64*0.5 = 224 => / 64 = 3.5
 	return float32(value) / 64.0

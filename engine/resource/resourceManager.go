@@ -6,6 +6,8 @@ import (
 
 	"tiny_farm/engine/abstract"
 	"tiny_farm/engine/render"
+	"tiny_farm/engine/utils/dispatch"
+	"tiny_farm/engine/utils/event"
 
 	"github.com/go-gl/mathgl/mgl32"
 )
@@ -20,6 +22,8 @@ type ResourceManager struct {
 	audio *audioManager
 	// 负责字体文件和字号缓存
 	fonts *fontManager
+	// 用于广播资源生命周期事件
+	dispatcher *dispatch.Dispatcher
 }
 
 // 确保ResourceManager实现IResourceManager接口
@@ -28,15 +32,19 @@ var _ abstract.IResourceManager = (*ResourceManager)(nil)
 // 创建资源管理器
 //
 // 当前纹理加载依赖 Renderer，所以需要在 Renderer 初始化完成后创建
-func NewResourceManager(renderer *render.Renderer) (*ResourceManager, error) {
+func NewResourceManager(renderer *render.Renderer, dispatcher *dispatch.Dispatcher) (*ResourceManager, error) {
 	textureManager, err := newTextureManager(renderer)
 	if err != nil {
 		return nil, err
 	}
+	if dispatcher == nil {
+		return nil, errors.New("resource manager dispatchers is not nil")
+	}
 	return &ResourceManager{
-		textures: textureManager,
-		audio:    newAudioManager(),
-		fonts:    newFontManager(renderer),
+		textures:   textureManager,
+		audio:      newAudioManager(),
+		fonts:      newFontManager(renderer),
+		dispatcher: dispatcher,
 	}, nil
 }
 
@@ -79,7 +87,9 @@ func (m *ResourceManager) Clear() {
 		m.audio.clear()
 	}
 	if m.fonts != nil {
-		m.fonts.clearFonts()
+		if m.fonts.clearFonts() {
+			m.triggerFontsCleared()
+		}
 	}
 	if m.textures != nil {
 		m.textures.clearTextures()
@@ -147,7 +157,9 @@ func (m *ResourceManager) UnloadFont(key ResourceKey, pixelSize int) {
 	if m == nil || m.fonts == nil {
 		return
 	}
-	m.fonts.unloadFont(key, pixelSize)
+	if m.fonts.unloadFont(key, pixelSize) {
+		m.triggerFontUnloaded(key, pixelSize)
+	}
 }
 
 // 返回按 key 和字号排序的字体调试信息
@@ -188,4 +200,23 @@ func (m *ResourceManager) UnloadMusic(key ResourceKey) {
 		return
 	}
 	m.audio.unloadMusic(key)
+}
+
+// 立即广播单个字体实例已经卸载
+func (m *ResourceManager) triggerFontUnloaded(key ResourceKey, pixelSize int) {
+	if m == nil || m.dispatcher == nil {
+		return
+	}
+	m.dispatcher.Trigger(event.FontUnloadedEvent{
+		Key:       key,
+		PixelSize: pixelSize,
+	})
+}
+
+// 立即广播全部字体实例已经清空
+func (m *ResourceManager) triggerFontsCleared() {
+	if m == nil || m.dispatcher == nil {
+		return
+	}
+	m.dispatcher.Trigger(event.FontsClearedEvent{})
 }

@@ -6,6 +6,7 @@ require (
 	github.com/SunshineZzzz/purego-sdl3 v0.0.0-20260413135210-02485965b09a
 	github.com/ebitengine/purego v0.9.1
 	github.com/go-gl/mathgl v1.2.0
+	github.com/go-text/typesetting v0.3.4
 	github.com/gopxl/beep/v2 v2.1.2-0.20250716203810-0ca406a247a7
 	golang.org/x/image v0.41.0
 	golang.org/x/sys v0.43.0

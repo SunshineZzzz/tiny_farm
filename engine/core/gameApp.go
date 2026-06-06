@@ -200,7 +200,13 @@ func (a *GameApp) render() {
 		slog.Error("draw demo text background failed", slog.Any("err", err))
 	}
 	params := &render.TextRenderParams{
-		Color: mgl32.Vec4{1.0, 0.96, 0.36, 1.0},
+		Color: render.ColorOptions{
+			StartColor:  mgl32.Vec4{1.0, 0.15, 0.1, 1.0},
+			EndColor:    mgl32.Vec4{0.1, 0.85, 1.0, 1.0},
+			UseGradient: true,
+			// 0 表示颜色沿屏幕水平方向从左向右变化
+			AngleRadians: 0.0,
+		},
 		Shadow: &render.ShadowOptions{
 			Enabled: true,
 			Offset:  mgl32.Vec2{2.0, 2.0},
@@ -432,7 +438,7 @@ func (a *GameApp) initGLRenderer() error {
 
 // 初始化资源管理器并加载启动阶段资源
 func (a *GameApp) initResourceManager() error {
-	manager, err := resource.NewResourceManager(a.renderer)
+	manager, err := resource.NewResourceManager(a.renderer, a.dispatcher)
 	if err != nil {
 		return err
 	}
@@ -458,12 +464,13 @@ func (a *GameApp) initResourceManager() error {
 
 // 初始化文本渲染器
 func (a *GameApp) initTextRenderer() error {
-	textRenderer, err := render.NewTextRenderer(a.resourceManager, a.renderer)
+	textRenderer, err := render.NewTextRenderer(a.resourceManager, a.renderer, a.dispatcher)
 	if err != nil {
 		return err
 	}
 	a.textRenderer = textRenderer
 	slog.Debug("text renderer init success")
+	slog.Debug("text renderer debug info", slog.Any("text", textRenderer.DebugInfo()))
 	return nil
 }
 
@@ -499,6 +506,11 @@ func (a *GameApp) close() {
 	if a.resourceManager != nil {
 		a.resourceManager.Clear()
 		a.resourceManager = nil
+	}
+
+	if a.textRenderer != nil {
+		a.textRenderer.Close()
+		a.textRenderer = nil
 	}
 
 	if a.renderer != nil {

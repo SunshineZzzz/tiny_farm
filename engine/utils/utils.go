@@ -1,9 +1,14 @@
 package utils
 
 import (
+	"fmt"
 	"image"
 	"image/draw"
+	"strconv"
+	"strings"
 	"unsafe"
+
+	"github.com/go-gl/mathgl/mgl32"
 )
 
 // 把 float32 切片作为字节切片
@@ -65,4 +70,25 @@ func ImageToNRGBA(img image.Image, flipY bool) *image.NRGBA {
 	}
 
 	return dst
+}
+
+// 解析 #RRGGBB 或 #RRGGBBAA 颜色
+func ParseHexColor(value string) (mgl32.Vec4, error) {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(value), "#")
+	if len(trimmed) != 6 && len(trimmed) != 8 {
+		return mgl32.Vec4{}, fmt.Errorf("color %q is invalid", value)
+	}
+	if len(trimmed) == 6 {
+		trimmed += "FF"
+	}
+	parsed, err := strconv.ParseUint(trimmed, 16, 32)
+	if err != nil {
+		return mgl32.Vec4{}, fmt.Errorf("color %q is invalid: %w", value, err)
+	}
+	return mgl32.Vec4{
+		float32((parsed>>24)&0xFF) / 255.0,
+		float32((parsed>>16)&0xFF) / 255.0,
+		float32((parsed>>8)&0xFF) / 255.0,
+		float32(parsed&0xFF) / 255.0,
+	}, nil
 }

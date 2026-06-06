@@ -23,16 +23,22 @@ type SignalSink[R any] struct {
 
 // 表示一条可释放的槽函数连接
 type SignalConnection[R any] struct {
+	// 连接所属的信号
 	signal *Signal[R]
-	slot   *signalSlot[R]
+	// 连接对应的槽函数节点
+	slot *signalSlot[R]
 }
 
 // 保存单个槽函数和连接状态
 type signalSlot[R any] struct {
-	callback  func() R
+	// 槽函数回调
+	callback func() R
+	// 是否仍保持连接
 	connected bool
-	previous  *signalSlot[R]
-	next      *signalSlot[R]
+	// 前一个槽函数节点
+	previous *signalSlot[R]
+	// 后一个槽函数节点
+	next *signalSlot[R]
 }
 
 // 返回绑定到当前信号的注册入口
@@ -116,6 +122,9 @@ func (c SignalConnection[R]) Release() {
 	c.signal.release(c.slot)
 }
 
+// 创建槽函数节点并追加到连接链表尾部
+//
+// 链表尾部代表最后注册的槽函数，派发时从尾部开始遍历
 func (s *Signal[R]) connect(callback func() R) SignalConnection[R] {
 	slot := &signalSlot[R]{
 		callback:  callback,
@@ -135,6 +144,9 @@ func (s *Signal[R]) connect(callback func() R) SignalConnection[R] {
 	}
 }
 
+// 释放指定槽函数连接
+//
+// 已释放的连接重复调用时保持无操作
 func (s *Signal[R]) release(slot *signalSlot[R]) {
 	if !slot.connected {
 		return
@@ -143,6 +155,9 @@ func (s *Signal[R]) release(slot *signalSlot[R]) {
 	s.disconnect(slot)
 }
 
+// 摘除派发期间延迟清理的失效槽函数
+//
+// 仅在最外层派发结束后调用，避免遍历过程中破坏连接链表
 func (s *Signal[R]) compact() {
 	for slot := range s.pending {
 		if !slot.connected {
@@ -153,6 +168,9 @@ func (s *Signal[R]) compact() {
 	s.pending = nil
 }
 
+// 标记指定槽函数为断开状态
+//
+// 非派发期间立即摘链，派发期间延迟到最外层派发结束后统一清理
 func (s *Signal[R]) disconnect(slot *signalSlot[R]) {
 	if !slot.connected {
 		return
@@ -170,6 +188,7 @@ func (s *Signal[R]) disconnect(slot *signalSlot[R]) {
 	s.pending[slot] = struct{}{}
 }
 
+// 从双向连接链表中摘除指定槽函数节点
 func (s *Signal[R]) unlink(slot *signalSlot[R]) {
 	if slot.previous != nil {
 		slot.previous.next = slot.next

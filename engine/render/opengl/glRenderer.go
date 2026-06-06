@@ -394,6 +394,18 @@ func (gr *GLRenderer) DrawTextureColor(texture *Texture, dstRect mgl32.Vec4, uvR
 	return gr.scenePass.queueTextureColor(texture, dstRect, uvRect, color)
 }
 
+// 绘制一个带颜色参数的逻辑坐标系贴图矩形
+func (gr *GLRenderer) DrawTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+	if gr == nil || gr.scenePass == nil {
+		return errors.New("gl renderer or scene pass is nil")
+	}
+	if dstRect.Z() <= 0 || dstRect.W() <= 0 {
+		return errors.New("dst rect width or height is invalid")
+	}
+
+	return gr.scenePass.queueTextureColorOptions(texture, dstRect, uvRect, color)
+}
+
 // 绘制一个逻辑坐标系下的贴图源矩形
 func (gr *GLRenderer) DrawTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
 	uvRect, err := textureSourceRectUV(texture, srcRect)
@@ -462,6 +474,17 @@ func (gr *GLRenderer) DrawUITextureColor(texture *Texture, dstRect mgl32.Vec4, u
 		return errors.New("ui dst rect width or height is invalid")
 	}
 	return gr.uiPass.queueTextureColor(texture, dstRect, uvRect, color)
+}
+
+// 绘制一个带颜色参数的 UI 逻辑坐标系贴图矩形
+func (gr *GLRenderer) DrawUITextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+	if gr == nil || gr.uiPass == nil {
+		return errors.New("gl renderer or ui pass is nil")
+	}
+	if dstRect.Z() <= 0 || dstRect.W() <= 0 {
+		return errors.New("ui dst rect width or height is invalid")
+	}
+	return gr.uiPass.queueTextureColorOptions(texture, dstRect, uvRect, color)
 }
 
 // 绘制一个 UI 逻辑坐标系下的贴图源矩形

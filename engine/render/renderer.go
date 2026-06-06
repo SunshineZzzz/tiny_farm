@@ -37,6 +37,9 @@ type Texture struct {
 // 纹理采样过滤方式
 type TextureFilter = opengl.TextureFilter
 
+// 控制单次绘制的颜色或顶点渐变
+type ColorOptions = opengl.ColorOptions
+
 const (
 	// 最近邻采样，适合像素风资源
 	TextureFilterNearest = opengl.TextureFilterNearest
@@ -485,6 +488,17 @@ func (r *Renderer) DrawTextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect
 	return r.backend.DrawTextureColor(texture.backend, dstRect, uvRect, color)
 }
 
+// 绘制带颜色参数的逻辑坐标系贴图矩形
+func (r *Renderer) DrawTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	return r.backend.DrawTextureColorOptions(texture.backend, dstRect, uvRect, color)
+}
+
 // 绘制世界坐标系下的贴图矩形
 func (r *Renderer) DrawWorldTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
 	return r.DrawWorldTextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
@@ -503,6 +517,21 @@ func (r *Renderer) DrawWorldTextureColor(texture *Texture, dstRect mgl32.Vec4, u
 		return nil
 	}
 	return r.backend.DrawTextureColor(texture.backend, logicalRect, uvRect, color)
+}
+
+// 绘制带颜色参数的世界坐标系贴图矩形
+func (r *Renderer) DrawWorldTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	logicalRect, ok := r.worldRectToLogical(dstRect)
+	if !ok {
+		return nil
+	}
+	return r.backend.DrawTextureColorOptions(texture.backend, logicalRect, uvRect, color)
 }
 
 // 绘制逻辑坐标系下的贴图源矩形
@@ -538,6 +567,17 @@ func (r *Renderer) DrawUITextureColor(texture *Texture, dstRect mgl32.Vec4, uvRe
 		return errors.New("texture is nil")
 	}
 	return r.backend.DrawUITextureColor(texture.backend, dstRect, uvRect, color)
+}
+
+// 绘制带颜色参数的 UI 逻辑坐标系贴图矩形
+func (r *Renderer) DrawUITextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.backend == nil {
+		return errors.New("texture is nil")
+	}
+	return r.backend.DrawUITextureColorOptions(texture.backend, dstRect, uvRect, color)
 }
 
 // 绘制 UI 逻辑坐标系下的贴图源矩形

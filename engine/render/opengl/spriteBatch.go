@@ -3,6 +3,7 @@ package opengl
 import (
 	"errors"
 	"fmt"
+	"math"
 	"unsafe"
 
 	"tiny_farm/engine/utils"
@@ -184,17 +185,14 @@ func (b *spriteBatch) clean() {
 	b.commands = nil
 }
 
-// 将纯色矩形加入本帧批处理队列
+// 将单色矩形加入本帧批处理队列
 func (b *spriteBatch) queueRect(rect mgl32.Vec4, color mgl32.Vec4) error {
-	if b == nil || b.glCtx == nil {
-		return errors.New("sprite batch is nil")
-	}
+	return b.queueRectColorOptions(rect, solidColorOptions(color))
+}
 
-	if rect.Z() <= 0 || rect.W() <= 0 {
-		return nil
-	}
-
-	return b.queueSprite(0, false, rect, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}, color)
+// 将带颜色参数的矩形加入本帧批处理队列
+func (b *spriteBatch) queueRectColorOptions(rect mgl32.Vec4, color ColorOptions) error {
+	return b.queueSpriteColorOptions(0, false, rect, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}, color)
 }
 
 // 将纯色四边形加入本帧批处理队列
@@ -247,11 +245,38 @@ func (b *spriteBatch) queueQuad(points [4]mgl32.Vec2, color mgl32.Vec4) error {
 
 // 将贴图矩形加入本帧批处理队列
 func (b *spriteBatch) queueTexture(texture *Texture, rect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+	return b.queueTextureColorOptions(texture, rect, uvRect, solidColorOptions(color))
+}
+
+// 将带颜色参数的贴图矩形加入本帧批处理队列
+func (b *spriteBatch) queueTextureColorOptions(texture *Texture, rect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
 	if texture == nil || texture.id == 0 {
 		return errors.New("texture is nil")
 	}
 
-	// 对外 UV 语义保持左上为原点，这里统一转换成 OpenGL 采样使用的 v 方向
+	// 我们对外约定：
+	// uvRect = {left, top, right, bottom}
+	// 而且是左上角为原点：
+	// 对外 UV：
+	// (0,0) 左上        (1,0) 右上
+	// +----------------+
+	// |                |
+	// |                |
+	// +----------------+
+	// (0,1) 左下        (1,1) 右下
+	// OpenGL 采样习惯是左下角为原点：
+	// OpenGL UV：
+	// (0,1) 左上        (1,1) 右上
+	// +----------------+
+	// |                |
+	// |                |
+	// +----------------+
+	// (0,0) 左下        (1,0) 右下
+	// 所以同一个“顶部”，对外是 v=0，OpenGL 是 v=1。
+	// 同一个“底部”，对外是 v=1，OpenGL 是 v=0。
+	// 因此要做：
+	// top    = 1.0 - top
+	// bottom = 1.0 - bottom
 	glUVRect := mgl32.Vec4{
 		uvRect.X(),
 		1.0 - uvRect.Y(),
@@ -259,11 +284,16 @@ func (b *spriteBatch) queueTexture(texture *Texture, rect mgl32.Vec4, uvRect mgl
 		1.0 - uvRect.W(),
 	}
 
-	return b.queueSprite(texture.id, true, rect, glUVRect, color)
+	return b.queueSpriteColorOptions(texture.id, true, rect, glUVRect, color)
 }
 
 // 将一个精灵加入本帧队列，纹理命令只合并相邻且纹理一致的段
 func (b *spriteBatch) queueSprite(texture uint32, useTexture bool, rect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+	return b.queueSpriteColorOptions(texture, useTexture, rect, uvRect, solidColorOptions(color))
+}
+
+// 将一个带颜色参数的精灵加入本帧队列，纹理命令只合并相邻且纹理一致的段
+func (b *spriteBatch) queueSpriteColorOptions(texture uint32, useTexture bool, rect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
 	if b == nil || b.glCtx == nil {
 		return errors.New("sprite batch is nil")
 	}
@@ -289,11 +319,24 @@ func (b *spriteBatch) queueSprite(texture uint32, useTexture bool, rect mgl32.Ve
 	// uvRect.W() // 下 v
 	//
 	// 左上，右上，右下，左下
+	points := [4]mgl32.Vec2{
+		{rect.X(), rect.Y()},
+		{rect.X() + rect.Z(), rect.Y()},
+		{rect.X() + rect.Z(), rect.Y() + rect.W()},
+		{rect.X(), rect.Y() + rect.W()},
+	}
+	uvs := [4]mgl32.Vec2{
+		{uvRect.X(), uvRect.Y()},
+		{uvRect.Z(), uvRect.Y()},
+		{uvRect.Z(), uvRect.W()},
+		{uvRect.X(), uvRect.W()},
+	}
+	colors := gradientVertexColors(points, color)
 	b.vertices = append(b.vertices,
-		rect.X(), rect.Y(), uvRect.X(), uvRect.Y(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X()+rect.Z(), rect.Y(), uvRect.Z(), uvRect.Y(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X()+rect.Z(), rect.Y()+rect.W(), uvRect.Z(), uvRect.W(), color.X(), color.Y(), color.Z(), color.W(),
-		rect.X(), rect.Y()+rect.W(), uvRect.X(), uvRect.W(), color.X(), color.Y(), color.Z(), color.W(),
+		points[0].X(), points[0].Y(), uvs[0].X(), uvs[0].Y(), colors[0].X(), colors[0].Y(), colors[0].Z(), colors[0].W(),
+		points[1].X(), points[1].Y(), uvs[1].X(), uvs[1].Y(), colors[1].X(), colors[1].Y(), colors[1].Z(), colors[1].W(),
+		points[2].X(), points[2].Y(), uvs[2].X(), uvs[2].Y(), colors[2].X(), colors[2].Y(), colors[2].Z(), colors[2].W(),
+		points[3].X(), points[3].Y(), uvs[3].X(), uvs[3].Y(), colors[3].X(), colors[3].Y(), colors[3].Z(), colors[3].W(),
 	)
 	indexFrom := uint32(len(b.indices))
 	b.indices = append(b.indices,
@@ -315,6 +358,48 @@ func (b *spriteBatch) queueSprite(texture uint32, useTexture bool, rect mgl32.Ve
 	})
 
 	return nil
+}
+
+// 按矩形四角和渐变参数计算每个顶点颜色
+func gradientVertexColors(points [4]mgl32.Vec2, color ColorOptions) [4]mgl32.Vec4 {
+	color = normalizeColorOptions(&color)
+	if !color.UseGradient {
+		// 单色调制
+		return [4]mgl32.Vec4{color.StartColor, color.StartColor, color.StartColor, color.StartColor}
+	}
+
+	// 渐变调制
+
+	// 计算渐变方向
+	direction := mgl32.Vec2{
+		float32(math.Cos(float64(color.AngleRadians))),
+		float32(math.Sin(float64(color.AngleRadians))),
+	}
+	if direction.LenSqr() <= 0.000001 {
+		direction = mgl32.Vec2{0.0, 1.0}
+	}
+
+	// 把每个顶点投影到这个方向上，找出投影后的最小值和最大值
+	minProjection := float32(math.MaxFloat32)
+	maxProjection := -float32(math.MaxFloat32)
+	for _, point := range points {
+		projection := point.Dot(direction)
+		minProjection = min(minProjection, projection)
+		maxProjection = max(maxProjection, projection)
+	}
+	if maxProjection-minProjection <= 0.00001 {
+		maxProjection = minProjection + 1.0
+	}
+
+	// 线性插值计算每个顶点的颜色
+	var colors [4]mgl32.Vec4
+	for i, point := range points {
+		projection := point.Dot(direction)
+		t := (projection - minProjection) / (maxProjection - minProjection)
+		t = max(0.0, min(1.0, t))
+		colors[i] = color.StartColor.Mul(1.0 - t).Add(color.EndColor.Mul(t))
+	}
+	return colors
 }
 
 // 提交本帧所有已入队矩形

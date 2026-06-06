@@ -79,4 +79,8 @@ type IFont interface {
 	LineHeight() float32
 	// 按需获取 rune 对应的 glyph
 	TextGlyph(rune) (IFontGlyph, error)
+	// 按需获取 glyph index 对应的 glyph
+	TextGlyphByIndex(uint32) (IFontGlyph, error)
+	// 返回底层 shaping 字体对象，由渲染层按具体 shaping 库解释
+	TextShapingFont() any
 }
