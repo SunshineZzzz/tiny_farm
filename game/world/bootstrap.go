@@ -27,7 +27,9 @@ func CreateDemoEntity(world donburi.World) (donburi.Entity, error) {
 		Position: mgl32.Vec2{32.0, 32.0},
 		Scale:    mgl32.Vec2{1.0, 1.0},
 	})
-	component.Velocity.SetValue(entry, component.VelocityComponent{})
+	component.Velocity.SetValue(entry, component.VelocityComponent{
+		Value: mgl32.Vec2{24.0, 12.0},
+	})
 	component.ShapeRender.SetValue(entry, component.ShapeRenderComponent{
 		Size:  mgl32.Vec2{24.0, 16.0},
 		Color: mgl32.Vec4{0.9, 0.72, 0.32, 1.0},

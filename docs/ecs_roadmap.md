@@ -14,8 +14,9 @@
 ## 当前进度
 
 - 阶段 0 已完成：运行时 Context、ECS World 和游戏层装配入口已经接通
-- 阶段 1 已完成：最小组件、演示实体、组件读写和组合查询测试已经落地
-- 阶段 2 尚未开始：当前没有 MovementSystem，`GameApp.update()` 仍未驱动 ECS 状态变化
+- 阶段 1 主体已完成：最小组件和演示实体已经落地，组件读写和组合查询测试待补
+- 阶段 2 主体已完成：MovementSystem 已接入 `GameApp.update()`，系统单元测试待补
+- 阶段 3 尚未开始：当前渲染仍使用 `GameApp.render()` 中的硬编码演示绘制
 - 当前主循环继续使用相对帧率方案
 
 ## 结论
@@ -25,7 +26,7 @@
 接入前的基础条件：
 
 - 当前已经有主循环、`deltaTime`、输入、相机、渲染和资源管理器，可以支撑 ECS 系统运行
-- 当前 `GameApp.update()` 还是空实现，`render()` 中仍是硬编码演示绘制，正好可以逐步替换
+- 接入前 `GameApp.update()` 还是空实现，`render()` 中仍是硬编码演示绘制，适合逐步替换
 - 当前没有可用的 Scene/SceneManager，不能直接采用参考项目的“一场景一 World”完整结构
 - 接入前 `engine/context.Context` 还是空结构，需要先建立窄口运行时服务上下文
 - 接入前 `sceneSetup` 只有注册没有执行，需要建立实际的游戏层装配入口
@@ -130,7 +131,7 @@ engine/
       shapeRenderComponent.go
       tags.go
     system/
-      movement.go
+      movementSystem.go
       render.go
       remove_entity.go
 

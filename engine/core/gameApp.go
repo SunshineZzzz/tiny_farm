@@ -7,6 +7,7 @@ import (
 
 	"tiny_farm/engine/abstract"
 	ectx "tiny_farm/engine/context"
+	"tiny_farm/engine/ecs/system"
 	"tiny_farm/engine/input"
 	"tiny_farm/engine/render"
 	"tiny_farm/engine/resource"
@@ -31,6 +32,8 @@ type GameApp struct {
 	runtimeContext *ectx.Context
 	// 当前过渡阶段由应用持有唯一 ECS World，后续随 Scene 生命周期迁移
 	world donburi.World
+	// 当前过渡阶段负责推进 ECS 实体位置，后续随 Scene 生命周期迁移
+	movementSystem *system.MovementSystem
 	// 防止同一个应用实例重复执行游戏层装配
 	sceneSetupDone bool
 	// 控制主循环是否继续执行
@@ -71,8 +74,9 @@ type GameApp struct {
 // 创建应用实例，并初始化帧率控制器
 func NewGameApp() *GameApp {
 	return &GameApp{
-		fpsManager:   NewFPS(),
-		statInterval: 1.0,
+		fpsManager:     NewFPS(),
+		movementSystem: system.NewMovementSystem(),
+		statInterval:   1.0,
 	}
 }
 
@@ -134,6 +138,7 @@ func (a *GameApp) handleInputEvents() {
 
 // 更新游戏状态
 func (a *GameApp) update(deltaTime float64) {
+	a.movementSystem.Update(a.world, deltaTime)
 }
 
 // 渲染
@@ -564,6 +569,7 @@ func (a *GameApp) close() {
 
 	a.world = nil
 	a.runtimeContext = nil
+	a.movementSystem = nil
 
 	a.inputManager = nil
 
