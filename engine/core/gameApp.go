@@ -15,10 +15,11 @@ import (
 
 	"github.com/SunshineZzzz/purego-sdl3/sdl"
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/yohamta/donburi"
 )
 
 // 把游戏层初始化逻辑注入到引擎入口
-type sceneSetupFunc func(*ectx.Context)
+type sceneSetupFunc func(*ectx.Context, donburi.World) error
 
 // 当前项目的应用壳
 //
@@ -26,6 +27,12 @@ type sceneSetupFunc func(*ectx.Context)
 type GameApp struct {
 	// 预留给游戏层做启动时装配
 	sceneSetup sceneSetupFunc
+	// 向游戏层暴露已经完成初始化的核心服务
+	runtimeContext *ectx.Context
+	// 当前过渡阶段由应用持有唯一 ECS World，后续随 Scene 生命周期迁移
+	world donburi.World
+	// 防止同一个应用实例重复执行游戏层装配
+	sceneSetupDone bool
 	// 控制主循环是否继续执行
 	isRunning bool
 	// 游戏窗口
@@ -307,12 +314,68 @@ func (a *GameApp) init() error {
 	// 注册窗口大小变化事件：更新 OpenGL 渲染器视口
 	dispatch.SinkOf[event.WindowResizedEvent](a.dispatcher).Connect(a.onWindowResizedEvent)
 
+	if err := a.initRuntimeContext(); err != nil {
+		return err
+	}
+
+	a.initWorld()
+
+	if err := a.setupScene(); err != nil {
+		return err
+	}
+
 	a.isRunning = true
 
 	slog.Debug(
 		"game app init",
 		slog.Bool("isRunning", a.isRunning),
 	)
+	return nil
+}
+
+// 创建当前过渡阶段使用的唯一 ECS World
+func (a *GameApp) initWorld() {
+	a.world = donburi.NewWorld()
+}
+
+// 创建提供给游戏层的运行时服务上下文
+func (a *GameApp) initRuntimeContext() error {
+	ctx, err := ectx.NewContext(
+		a.inputManager,
+		a.renderer,
+		a.resourceManager,
+		a.camera,
+		a.dispatcher,
+		a.gameState,
+	)
+	if err != nil {
+		return err
+	}
+
+	a.runtimeContext = ctx
+	return nil
+}
+
+// 执行一次游戏层初始化装配，并把错误交回应用初始化流程
+func (a *GameApp) setupScene() error {
+	if a.sceneSetupDone {
+		return nil
+	}
+	if a.sceneSetup == nil {
+		return errors.New("scene setup not registered")
+	}
+	if a.runtimeContext == nil {
+		return errors.New("runtime context is nil")
+	}
+	if a.world == nil {
+		return errors.New("ecs world is nil")
+	}
+
+	if err := a.sceneSetup(a.runtimeContext, a.world); err != nil {
+		return err
+	}
+
+	a.sceneSetupDone = true
 	return nil
 }
 
@@ -498,6 +561,9 @@ func (a *GameApp) close() {
 	}
 
 	slog.Debug("game app closed", slog.Bool("isRunning", a.isRunning))
+
+	a.world = nil
+	a.runtimeContext = nil
 
 	a.inputManager = nil
 

@@ -1,4 +1,87 @@
 package context
 
+import (
+	"errors"
+
+	"tiny_farm/engine/abstract"
+	"tiny_farm/engine/input"
+	"tiny_farm/engine/render"
+	"tiny_farm/engine/resource"
+	"tiny_farm/engine/utils/dispatch"
+)
+
+// 持有跨游戏场景复用的核心引擎服务
+//
+// 当前只提供运行时装配所需的基础服务，场景状态和后续 ECS World 不放在这里
 type Context struct {
+	inputManager    *input.InputManager
+	renderer        *render.Renderer
+	resourceManager *resource.ResourceManager
+	camera          *render.Camera
+	dispatcher      *dispatch.Dispatcher
+	gameState       abstract.IGameState
+}
+
+// 创建运行时上下文，并确保游戏层装配时拿到的核心服务均可用
+func NewContext(
+	inputManager *input.InputManager,
+	renderer *render.Renderer,
+	resourceManager *resource.ResourceManager,
+	camera *render.Camera,
+	dispatcher *dispatch.Dispatcher,
+	gameState abstract.IGameState,
+) (*Context, error) {
+	switch {
+	case inputManager == nil:
+		return nil, errors.New("input manager is nil")
+	case renderer == nil:
+		return nil, errors.New("renderer is nil")
+	case resourceManager == nil:
+		return nil, errors.New("resource manager is nil")
+	case camera == nil:
+		return nil, errors.New("camera is nil")
+	case dispatcher == nil:
+		return nil, errors.New("dispatcher is nil")
+	case gameState == nil:
+		return nil, errors.New("game state is nil")
+	}
+
+	return &Context{
+		inputManager:    inputManager,
+		renderer:        renderer,
+		resourceManager: resourceManager,
+		camera:          camera,
+		dispatcher:      dispatcher,
+		gameState:       gameState,
+	}, nil
+}
+
+// 获取输入管理器
+func (c *Context) InputManager() *input.InputManager {
+	return c.inputManager
+}
+
+// 获取渲染器
+func (c *Context) Renderer() *render.Renderer {
+	return c.renderer
+}
+
+// 获取资源管理器
+func (c *Context) ResourceManager() *resource.ResourceManager {
+	return c.resourceManager
+}
+
+// 获取当前世界相机
+func (c *Context) Camera() *render.Camera {
+	return c.camera
+}
+
+// 获取事件分发器
+func (c *Context) Dispatcher() *dispatch.Dispatcher {
+	return c.dispatcher
+}
+
+// 获取游戏状态
+func (c *Context) GameState() abstract.IGameState {
+	return c.gameState
 }
