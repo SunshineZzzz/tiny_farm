@@ -7,20 +7,19 @@ import (
 
 	"tiny_farm/engine/abstract"
 	ectx "tiny_farm/engine/context"
-	"tiny_farm/engine/ecs/system"
 	"tiny_farm/engine/input"
 	"tiny_farm/engine/render"
 	"tiny_farm/engine/resource"
+	"tiny_farm/engine/scene"
 	"tiny_farm/engine/utils/dispatch"
 	"tiny_farm/engine/utils/event"
 
 	"github.com/SunshineZzzz/purego-sdl3/sdl"
 	"github.com/go-gl/mathgl/mgl32"
-	"github.com/yohamta/donburi"
 )
 
 // 把游戏层初始化逻辑注入到引擎入口
-type sceneSetupFunc func(*ectx.Context, donburi.World) error
+type sceneSetupFunc func(*ectx.Context) (scene.IScene, error)
 
 // 当前项目的应用壳
 //
@@ -30,10 +29,8 @@ type GameApp struct {
 	sceneSetup sceneSetupFunc
 	// 向游戏层暴露已经完成初始化的核心服务
 	runtimeContext *ectx.Context
-	// 当前过渡阶段由应用持有唯一 ECS World，后续随 Scene 生命周期迁移
-	world donburi.World
-	// 当前过渡阶段负责推进 ECS 实体位置，后续随 Scene 生命周期迁移
-	movementSystem *system.MovementSystem
+	// 管理场景栈、切换安全时点和场景生命周期
+	sceneManager *scene.SceneManager
 	// 防止同一个应用实例重复执行游戏层装配
 	sceneSetupDone bool
 	// 控制主循环是否继续执行
@@ -50,7 +47,7 @@ type GameApp struct {
 	textRenderer *render.TextRenderer
 	// 当前帧使用的世界相机
 	camera *render.Camera
-	// 阶段 4 用于验证贴图绘制的临时纹理
+	// 用于保留现有渲染功能验证画面的临时纹理
 	demoTexture *render.Texture
 	// 游戏配置
 	config *Config
@@ -74,9 +71,8 @@ type GameApp struct {
 // 创建应用实例，并初始化帧率控制器
 func NewGameApp() *GameApp {
 	return &GameApp{
-		fpsManager:     NewFPS(),
-		movementSystem: system.NewMovementSystem(),
-		statInterval:   1.0,
+		fpsManager:   NewFPS(),
+		statInterval: 1.0,
 	}
 }
 
@@ -138,7 +134,13 @@ func (a *GameApp) handleInputEvents() {
 
 // 更新游戏状态
 func (a *GameApp) update(deltaTime float64) {
-	a.movementSystem.Update(a.world, deltaTime)
+	if a.sceneManager == nil {
+		return
+	}
+	if err := a.sceneManager.Update(deltaTime); err != nil {
+		slog.Error("scene update failed", slog.Any("err", err))
+		a.isRunning = false
+	}
 }
 
 // 渲染
@@ -149,7 +151,11 @@ func (a *GameApp) render() {
 
 	a.renderer.BeginFrame(a.camera)
 	a.renderer.Clear()
-	a.renderer.DrawWorldRect(mgl32.Vec4{32.0, 32.0, 96.0, 64.0}, mgl32.Vec4{0.9, 0.72, 0.32, 1.0})
+	if a.sceneManager != nil {
+		if err := a.sceneManager.Render(); err != nil {
+			slog.Error("scene render failed", slog.Any("err", err))
+		}
+	}
 	a.renderer.DrawWorldRect(mgl32.Vec4{144.0, 48.0, 48.0, 96}, mgl32.Vec4{0.38, 0.72, 0.92, 1.0})
 	a.renderer.DrawWorldRect(mgl32.Vec4{216.0, 80.0, 72.0, 40.0}, mgl32.Vec4{0.78, 0.42, 0.88, 1.0})
 	if a.demoTexture != nil {
@@ -323,8 +329,6 @@ func (a *GameApp) init() error {
 		return err
 	}
 
-	a.initWorld()
-
 	if err := a.setupScene(); err != nil {
 		return err
 	}
@@ -336,11 +340,6 @@ func (a *GameApp) init() error {
 		slog.Bool("isRunning", a.isRunning),
 	)
 	return nil
-}
-
-// 创建当前过渡阶段使用的唯一 ECS World
-func (a *GameApp) initWorld() {
-	a.world = donburi.NewWorld()
 }
 
 // 创建提供给游戏层的运行时服务上下文
@@ -372,11 +371,20 @@ func (a *GameApp) setupScene() error {
 	if a.runtimeContext == nil {
 		return errors.New("runtime context is nil")
 	}
-	if a.world == nil {
-		return errors.New("ecs world is nil")
+
+	initialScene, err := a.sceneSetup(a.runtimeContext)
+	if err != nil {
+		return err
+	}
+	if initialScene == nil {
+		return errors.New("initial scene is nil")
 	}
 
-	if err := a.sceneSetup(a.runtimeContext, a.world); err != nil {
+	a.sceneManager = scene.NewSceneManager()
+	a.runtimeContext.SetSceneManager(a.sceneManager)
+	if err := a.sceneManager.PushInitial(initialScene); err != nil {
+		a.runtimeContext.SetSceneManager(nil)
+		a.sceneManager = nil
 		return err
 	}
 
@@ -567,9 +575,14 @@ func (a *GameApp) close() {
 
 	slog.Debug("game app closed", slog.Bool("isRunning", a.isRunning))
 
-	a.world = nil
-	a.runtimeContext = nil
-	a.movementSystem = nil
+	if a.sceneManager != nil {
+		a.sceneManager.Close()
+		a.sceneManager = nil
+	}
+	if a.runtimeContext != nil {
+		a.runtimeContext.SetSceneManager(nil)
+		a.runtimeContext = nil
+	}
 
 	a.inputManager = nil
 

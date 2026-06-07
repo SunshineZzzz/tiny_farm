@@ -84,3 +84,9 @@ type IFont interface {
 	// 返回底层 shaping 字体对象，由渲染层按具体 shaping 库解释
 	TextShapingFont() any
 }
+
+// 动作输入接口
+type IActionInput interface {
+	// 返回动作当前是否处于按下或持续按下状态
+	IsActionDown(actionID defs.ActionID) bool
+}

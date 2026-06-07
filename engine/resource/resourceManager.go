@@ -112,6 +112,16 @@ func (m *ResourceManager) TextureSize(key ResourceKey) (mgl32.Vec2, bool) {
 	return m.textures.textureSize(key)
 }
 
+// 返回可用纹理实例
+//
+// 缓存未命中时会优先使用传入路径加载，没有传入路径时把 key 作为文件路径
+func (m *ResourceManager) Texture(key ResourceKey, paths ...string) (*render.Texture, error) {
+	if m == nil || m.textures == nil {
+		return nil, errors.New("resource manager texture manager is nil")
+	}
+	return m.textures.texture(key, paths...)
+}
+
 // 卸载指定纹理资源
 func (m *ResourceManager) UnloadTexture(key ResourceKey) {
 	if m == nil || m.textures == nil {

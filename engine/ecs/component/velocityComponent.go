@@ -5,7 +5,7 @@ import (
 	"github.com/yohamta/donburi"
 )
 
-// 保存实体每秒在世界空间中的移动量
+// 速度组件，保存实体每秒在世界空间中的移动量
 type VelocityComponent struct {
 	// 每秒移动速度
 	Value mgl32.Vec2

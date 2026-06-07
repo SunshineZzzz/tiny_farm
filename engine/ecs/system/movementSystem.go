@@ -7,11 +7,11 @@ import (
 	"github.com/yohamta/donburi/filter"
 )
 
-// 根据实体速度推进世界空间位置
+// 移动系统，根据实体速度推进世界空间位置
 //
 // 当前只处理最小移动规则，不包含碰撞、固定时间步、插值和空间索引
 type MovementSystem struct {
-	// 复用 Transform 和 Velocity 的组合查询，避免每帧重复创建
+	// 查询句柄，用于查询同时包含 Transform 和 Velocity 的实体
 	query *donburi.Query
 }
 

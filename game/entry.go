@@ -7,9 +7,8 @@ import (
 
 	ectx "tiny_farm/engine/context"
 	"tiny_farm/engine/core"
-	gameworld "tiny_farm/game/world"
-
-	"github.com/yohamta/donburi"
+	escene "tiny_farm/engine/scene"
+	gscene "tiny_farm/game/scene"
 )
 
 // 初始化当前游戏运行环境
@@ -36,20 +35,10 @@ func Run() {
 	app.Run()
 }
 
-// 装配当前过渡阶段的初始 ECS 世界
-func setupInitialScene(ctx *ectx.Context, world donburi.World) error {
+// 创建应用启动后的初始游戏场景
+func setupInitialScene(ctx *ectx.Context) (escene.IScene, error) {
 	if ctx == nil {
-		return errors.New("runtime context is nil")
+		return nil, errors.New("runtime context is nil")
 	}
-	if world == nil {
-		return errors.New("ecs world is nil")
-	}
-
-	entity, err := gameworld.CreateDemoEntity(world)
-	if err != nil {
-		return err
-	}
-
-	slog.Debug("demo ecs entity created", slog.Any("entity", entity))
-	return nil
+	return gscene.NewGameScene(ctx), nil
 }

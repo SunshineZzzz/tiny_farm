@@ -7,6 +7,7 @@ import (
 	"tiny_farm/engine/input"
 	"tiny_farm/engine/render"
 	"tiny_farm/engine/resource"
+	"tiny_farm/engine/scene"
 	"tiny_farm/engine/utils/dispatch"
 )
 
@@ -20,6 +21,7 @@ type Context struct {
 	camera          *render.Camera
 	dispatcher      *dispatch.Dispatcher
 	gameState       abstract.IGameState
+	sceneManager    *scene.SceneManager
 }
 
 // 创建运行时上下文，并确保游戏层装配时拿到的核心服务均可用
@@ -84,4 +86,20 @@ func (c *Context) Dispatcher() *dispatch.Dispatcher {
 // 获取游戏状态
 func (c *Context) GameState() abstract.IGameState {
 	return c.gameState
+}
+
+// 注入应用创建的场景管理器
+func (c *Context) SetSceneManager(sceneManager *scene.SceneManager) {
+	if c == nil {
+		return
+	}
+	c.sceneManager = sceneManager
+}
+
+// 获取场景管理器，用于请求安全时点的场景切换
+func (c *Context) SceneManager() *scene.SceneManager {
+	if c == nil {
+		return nil
+	}
+	return c.sceneManager
 }

@@ -5,7 +5,7 @@ import (
 	"github.com/yohamta/donburi"
 )
 
-// 保存实体在世界空间中的位置、缩放和旋转
+// 变换组件，保存实体在世界空间中的位置、缩放和旋转
 type TransformComponent struct {
 	// 世界空间位置
 	Position mgl32.Vec2

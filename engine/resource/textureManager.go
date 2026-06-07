@@ -85,6 +85,25 @@ func (m *textureManager) textureSize(key ResourceKey) (mgl32.Vec2, bool) {
 	return entry.size, true
 }
 
+// 返回可用纹理，缓存未命中时按传入路径或已登记路径加载
+func (m *textureManager) texture(key ResourceKey, paths ...string) (*render.Texture, error) {
+	if m == nil || m.renderer == nil {
+		return nil, errors.New("texture manager is nil")
+	}
+	entry, ok := m.textures[key]
+	if ok && entry != nil && entry.texture != nil {
+		return entry.texture, nil
+	}
+	path := ""
+	if len(paths) > 0 {
+		path = paths[0]
+	}
+	if path == "" {
+		path = string(key)
+	}
+	return m.loadTexture(key, path)
+}
+
 // 卸载指定纹理
 func (m *textureManager) unloadTexture(key ResourceKey) {
 	if m == nil {

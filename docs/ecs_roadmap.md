@@ -5,23 +5,25 @@
 当前 Go 版本使用 `github.com/yohamta/donburi` 接入 ECS，但不一次性照搬教程和
 `copy_source/TinyFarm` 的完整实现。
 
-第一条主线只建立一个可见、可测试的闭环：
+第一条主线已经建立一个可见、可测试的闭环：
 
-`游戏层创建实体 -> 输入系统写速度 -> 移动系统写位置 -> 渲染系统提交矩形`
+`游戏层创建实体 -> 输入系统写速度 -> 移动系统写位置 -> 渲染系统提交精灵`
 
-完成该闭环后，再按真实玩法需求增加精灵、动画、碰撞、地图、实体工厂和场景管理。
+闭环完成后，动画、碰撞、地图、实体工厂和存档继续按真实玩法需求引入。
 
 ## 当前进度
 
-- 阶段 0 已完成：运行时 Context、ECS World 和游戏层装配入口已经接通
-- 阶段 1 主体已完成：最小组件和演示实体已经落地，组件读写和组合查询测试待补
-- 阶段 2 主体已完成：MovementSystem 已接入 `GameApp.update()`，系统单元测试待补
-- 阶段 3 尚未开始：当前渲染仍使用 `GameApp.render()` 中的硬编码演示绘制
+- 阶段 0-3 已完成：运行时装配、最小组件、移动和过渡渲染链路已经验证
+- 阶段 4 已完成：PlayerControlSystem 已建立输入到 Velocity 的链路，对角移动使用归一化规则
+- 阶段 5 已完成：NeedRemoveTag 和 RemoveEntitySystem 已集中处理实体删除
+- 阶段 6 已完成：SpriteComponent、RenderComponent 和正式 RenderSystem 已替换 ShapeRender 过渡层
+- 阶段 7 已完成：SceneManager 和 GameScene 已落地，World 所有权已经迁移到 GameScene
+- 阶段 8 保持需求驱动：动画、碰撞、地图和存档不在没有玩法需求时提前实现
 - 当前主循环继续使用相对帧率方案
 
 ## 结论
 
-现在适合引入 ECS，但只适合引入最小骨架。
+当前 ECS 第一阶段接入已经完成。
 
 接入前的基础条件：
 
@@ -32,7 +34,7 @@
 - 接入前 `sceneSetup` 只有注册没有执行，需要建立实际的游戏层装配入口
 - 地图加载、碰撞、动画、蓝图和存档尚未形成稳定基础设施，过早迁移对应组件和系统只会制造空壳
 
-因此先让 `GameApp` 临时持有一个 World，等 Scene 生命周期落地后，再把 World 的所有权迁移到 Scene。
+当前 `GameApp` 不再持有 World，`GameScene` 持有场景独占 World 和系统集合。
 
 ## 参考边界
 
@@ -100,15 +102,7 @@ movementSystem.Update(world, deltaTime)
 
 ## 所有权边界
 
-### 当前过渡阶段
-
-- `GameApp` 持有唯一 `donburi.World`
-- `Context` 暴露输入、渲染、资源、相机、事件和游戏状态等服务
-- 游戏层装配函数接收 World 和 Context，创建初始实体
-- `GameApp.update()` 显式执行更新系统
-- `GameApp.render()` 在 `BeginFrame/Clear` 之后执行 ECS 渲染系统
-
-### Scene 落地后
+### 当前结构
 
 - 每个 Scene 持有自己的 `donburi.World`
 - Scene 创建并持有本场景需要的系统
@@ -128,20 +122,26 @@ engine/
     component/
       transformComponent.go
       velocityComponent.go
-      shapeRenderComponent.go
+      spriteComponent.go
+      renderComponent.go
       tags.go
     system/
       movementSystem.go
-      render.go
-      remove_entity.go
+      renderSystem.go
+      removeEntitySystem.go
+  scene/
+    scene.go
+    sceneManager.go
 
 game/
   component/
     tags.go
   system/
-    player_control.go
-  world/
-    bootstrap.go
+    playerControlSystem.go
+  scene/
+    gameScene.go
+  factory/
+    playerFactory.go
 ```
 
 目录名使用 `engine/ecs` 是为了表达这些组件和系统依赖 donburi。不要创建一个新的自研 World
@@ -486,7 +486,7 @@ go build .
 go run .
 ```
 
-## 推荐的第一批提交
+## 已完成的第一批工作
 
 ### 提交 1：补齐运行时装配入口
 
@@ -518,5 +518,5 @@ go run .
 - 增加 PlayerTag 和 PlayerControlSystem
 - 完成输入到移动到渲染的闭环
 
-做到提交 5 后，才算真正完成 ECS 的第一阶段接入。此时再决定优先建设 Scene、Sprite
-还是碰撞，不需要现在预先实现整套参考项目架构。
+上述工作已经完成，并继续落地了集中删除、正式 Sprite 渲染和 Scene 生命周期。
+后续只按玩法需求增加阶段 8 中的动画、碰撞、地图与存档能力。

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"tiny_farm/engine/abstract"
+	"tiny_farm/engine/utils/defs"
 	"tiny_farm/engine/utils/dispatch"
 	"tiny_farm/engine/utils/event"
 	emath "tiny_farm/engine/utils/math"
@@ -38,11 +39,6 @@ const (
 	defaultConfigPath = "config/input.json"
 )
 
-// 动作名称在 Go 侧的标识
-//
-// 当前直接使用配置中的动作名称，避免为精简客户端额外引入哈希层
-type ActionID string
-
 // 表示动作回调的注册入口
 type ActionSink = dispatch.SignalSink[bool]
 
@@ -61,11 +57,11 @@ type InputManager struct {
 	// 游戏状态
 	gameState abstract.IGameState
 	// 保存动作在 Pressed、Held、Released 三个阶段的回调信号
-	actionsToFunc map[ActionID][callbackStateCount]*dispatch.Signal[bool]
+	actionsToFunc map[defs.ActionID][callbackStateCount]*dispatch.Signal[bool]
 	// 保存每个动作当前所处的状态
-	actionStates map[ActionID]ActionState
+	actionStates map[defs.ActionID]ActionState
 	// 保存键盘或鼠标输入到动作列表的映射
-	inputToActions map[uint32][]ActionID
+	inputToActions map[uint32][]defs.ActionID
 	// 窗口坐标系中的鼠标位置
 	mousePosition mgl32.Vec2
 	// 映射到游戏逻辑坐标系后的鼠标位置
@@ -75,6 +71,9 @@ type InputManager struct {
 	// 预留给调试 UI 转发 SDL 事件
 	eventForwarder func(*sdl.Event)
 }
+
+// 确保 InputManager 实现 IActionInput 接口
+var _ abstract.IActionInput = (*InputManager)(nil)
 
 // 解析输入映射配置文件
 type inputConfig struct {
@@ -89,9 +88,9 @@ func NewInputManager(dispatcher *dispatch.Dispatcher, window *sdl.Window, gameSt
 		dispatcher:      dispatcher,
 		window:          window,
 		gameState:       gameState,
-		actionsToFunc:   make(map[ActionID][callbackStateCount]*dispatch.Signal[bool]),
-		actionStates:    make(map[ActionID]ActionState),
-		inputToActions:  make(map[uint32][]ActionID),
+		actionsToFunc:   make(map[defs.ActionID][callbackStateCount]*dispatch.Signal[bool]),
+		actionStates:    make(map[defs.ActionID]ActionState),
+		inputToActions:  make(map[uint32][]defs.ActionID),
 		mouseWheelDelta: mgl32.Vec2{},
 	}
 
@@ -118,7 +117,7 @@ func NewInputManager(dispatcher *dispatch.Dispatcher, window *sdl.Window, gameSt
 // 返回指定动作状态的回调注册入口
 //
 // Inactive 不是可触发阶段；传入 Inactive 时会回退到 Pressed，避免调用方绑定到无效列表
-func (m *InputManager) OnAction(actionID ActionID, state ActionState) ActionSink {
+func (m *InputManager) OnAction(actionID defs.ActionID, state ActionState) ActionSink {
 	if m == nil {
 		return ActionSink{}
 	}
@@ -168,7 +167,7 @@ func (m *InputManager) Quit() {
 }
 
 // 返回动作当前是否处于按下或持续按下状态
-func (m *InputManager) IsActionDown(actionID ActionID) bool {
+func (m *InputManager) IsActionDown(actionID defs.ActionID) bool {
 	if m == nil {
 		return false
 	}
@@ -178,7 +177,7 @@ func (m *InputManager) IsActionDown(actionID ActionID) bool {
 }
 
 // 返回动作是否在本帧刚按下
-func (m *InputManager) IsActionPressed(actionID ActionID) bool {
+func (m *InputManager) IsActionPressed(actionID defs.ActionID) bool {
 	if m == nil {
 		return false
 	}
@@ -187,7 +186,7 @@ func (m *InputManager) IsActionPressed(actionID ActionID) bool {
 }
 
 // 返回动作是否在本帧刚释放
-func (m *InputManager) IsActionReleased(actionID ActionID) bool {
+func (m *InputManager) IsActionReleased(actionID defs.ActionID) bool {
 	if m == nil {
 		return false
 	}
@@ -234,12 +233,12 @@ func (m *InputManager) SetEventForwarder(callback func(*sdl.Event)) {
 }
 
 // 返回动作状态快照，供调试面板读取
-func (m *InputManager) ActionStatesDebug() map[ActionID]ActionState {
+func (m *InputManager) ActionStatesDebug() map[defs.ActionID]ActionState {
 	if m == nil {
 		return nil
 	}
 
-	states := make(map[ActionID]ActionState, len(m.actionStates))
+	states := make(map[defs.ActionID]ActionState, len(m.actionStates))
 	for actionID, state := range m.actionStates {
 		states[actionID] = state
 	}
@@ -249,7 +248,7 @@ func (m *InputManager) ActionStatesDebug() map[ActionID]ActionState {
 // 手动设置动作状态
 //
 // 该方法只用于调试入口，允许调试面板临时触发某个动作状态
-func (m *InputManager) SetActionStateDebug(actionID ActionID, state ActionState) {
+func (m *InputManager) SetActionStateDebug(actionID defs.ActionID, state ActionState) {
 	if m == nil {
 		return
 	}
@@ -342,7 +341,7 @@ func (m *InputManager) updateActionsForInput(input uint32, isActive bool, isRepe
 }
 
 // 更新动作状态
-func (m *InputManager) updateActionState(actionID ActionID, isActive bool, isRepeat bool) {
+func (m *InputManager) updateActionState(actionID defs.ActionID, isActive bool, isRepeat bool) {
 	state, ok := m.actionStates[actionID]
 	if !ok {
 		slog.Warn("update unregistered action ignored", slog.String("actionID", string(actionID)))
@@ -423,7 +422,7 @@ func (m *InputManager) initializeMappings(actionsToKeyName map[string][]string) 
 	clear(m.actionStates)
 
 	for actionName, keyNames := range actionsToKeyName {
-		actionID := ActionID(actionName)
+		actionID := defs.ActionID(actionName)
 		m.actionStates[actionID] = Inactive
 
 		for _, keyName := range keyNames {
