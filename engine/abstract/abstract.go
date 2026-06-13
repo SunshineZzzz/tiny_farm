@@ -59,7 +59,7 @@ type IAudioBufferHandle interface {
 // 资源管理器接口
 type IResourceManager interface {
 	// 加载字体资源，如果命中缓存则直接返回已有字体
-	LoadFont(key defs.ResourceKey, pixelSize int, paths ...string) (IFont, error)
+	LoadFont(defs.ResourceKey, int, ...string) (IFont, error)
 	// 加载音效资源，如果命中缓存则直接返回已有 buffer
 	LoadSound(defs.ResourceKey, ...string) (IAudioBufferHandle, error)
 	// 加载音乐资源，如果命中缓存则直接返回已有 buffer
@@ -101,7 +101,7 @@ type IFont interface {
 // 动作输入接口
 type IActionInput interface {
 	// 返回动作当前是否处于按下或持续按下状态
-	IsActionDown(actionID defs.ActionID) bool
+	IsActionDown(defs.ActionID) bool
 }
 
 // 音效播放器接口

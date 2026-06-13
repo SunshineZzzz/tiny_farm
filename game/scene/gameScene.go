@@ -126,7 +126,7 @@ func (s *GameScene) playSceneMusic() {
 	if s == nil || s.context == nil || s.context.AudioPlayer() == nil {
 		return
 	}
-	if err := s.context.AudioPlayer().PlayMusic(defs.ResourceKey("scene-bg-music"), true, 0); err != nil {
+	if err := s.context.AudioPlayer().PlayMusic(defs.ResourceKey("scene-bg-music"), true, 2000); err != nil {
 		slog.Warn("play scene music failed", slog.Any("err", err))
 	}
 }

@@ -95,6 +95,46 @@ func (v *linearVolume) Err() error {
 	return v.Streamer.Err()
 }
 
+// 对 streamer 输出做线性淡入
+type fadeInStreamer struct {
+	// 被包装的音频流
+	Streamer beep.Streamer
+	// 淡入持续采样数
+	totalSamples int
+	// 已经输出的采样数
+	playedSamples int
+}
+
+// 确保 fadeInStreamer 实现 beep.Streamer 接口
+var _ beep.Streamer = (*fadeInStreamer)(nil)
+
+// 输出按淡入进度调整后的采样
+func (f *fadeInStreamer) Stream(samples [][2]float64) (int, bool) {
+	if f == nil || f.Streamer == nil {
+		return 0, false
+	}
+	n, ok := f.Streamer.Stream(samples)
+	if f.totalSamples <= 0 {
+		return n, ok
+	}
+	// 每个采样点根据当前播放到第几个采样，算一个淡入音量 gain
+	for i := range samples[:n] {
+		gain := fadeInGain(f.playedSamples+i, f.totalSamples)
+		samples[i][0] *= gain
+		samples[i][1] *= gain
+	}
+	f.playedSamples += n
+	return n, ok
+}
+
+// 返回底层 streamer 的播放错误
+func (f *fadeInStreamer) Err() error {
+	if f == nil || f.Streamer == nil {
+		return nil
+	}
+	return f.Streamer.Err()
+}
+
 // 对 streamer 输出做简化左右声像调整
 type panStreamer struct {
 	// 被包装的音频流
@@ -263,9 +303,6 @@ func (p *AudioPlayer) PlayMusic(key defs.ResourceKey, loop bool, fadeInMS int, p
 	if p.music != nil && p.currentMusicKey == key {
 		return nil
 	}
-	// 淡入淡出参数先保留在 API 上，当前阶段暂不实现 cross-fade
-	_ = fadeInMS
-
 	handle, err := p.resourceManager.LoadMusic(key, paths...)
 	if err != nil {
 		return err
@@ -281,6 +318,7 @@ func (p *AudioPlayer) PlayMusic(key defs.ResourceKey, loop bool, fadeInMS int, p
 			return err
 		}
 	}
+	playStream = withFadeIn(playStream, format.SampleRate, fadeInMS)
 	if err := p.ensureBackend(format.SampleRate); err != nil {
 		return err
 	}
@@ -493,6 +531,33 @@ func stopInstance(instance *playbackInstance) {
 	}
 	instance.ctrl.Streamer = nil
 	instance.finished = true
+}
+
+// 按毫秒创建淡入包装
+func withFadeIn(streamer beep.Streamer, sampleRate beep.SampleRate, fadeInMS int) beep.Streamer {
+	if streamer == nil || sampleRate <= 0 || fadeInMS <= 0 {
+		return streamer
+	}
+	// 它把“毫秒”换算成“采样数”
+	totalSamples := int(sampleRate) * fadeInMS / 1000
+	if totalSamples <= 0 {
+		return streamer
+	}
+	return &fadeInStreamer{
+		Streamer:     streamer,
+		totalSamples: totalSamples,
+	}
+}
+
+// 计算指定采样点的淡入增益
+func fadeInGain(sampleIndex int, totalSamples int) float64 {
+	if totalSamples <= 0 || sampleIndex >= totalSamples {
+		return 1.0
+	}
+	if sampleIndex <= 0 {
+		return 0.0
+	}
+	return float64(sampleIndex) / float64(totalSamples)
 }
 
 // 根据 pan 计算左右声道增益
