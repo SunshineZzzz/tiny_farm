@@ -2,6 +2,8 @@ package event
 
 import (
 	"tiny_farm/engine/utils/defs"
+
+	"github.com/yohamta/donburi"
 )
 
 // --- 控制流事件（推荐 trigger<T>() 立即分发） ---
@@ -29,3 +31,11 @@ type FontUnloadedEvent struct {
 type FontsClearedEvent struct{}
 
 // --- 动画/音频等反馈事件（通常推荐 enqueue + dispatcher.update()） ---
+
+// 请求播放音效的反馈事件，推荐使用 Enqueue 后在帧尾统一分发
+type PlaySoundEvent struct {
+	// 关联实体，零值表示全局音效
+	Entity donburi.Entity
+	// 音效资源 key 或实体音频组件里的触发 key
+	SoundKey defs.ResourceKey
+}

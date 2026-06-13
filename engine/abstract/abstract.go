@@ -4,6 +4,7 @@ import (
 	"tiny_farm/engine/utils/defs"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/gopxl/beep/v2"
 )
 
 type GameStateType int
@@ -47,10 +48,22 @@ type IGameState interface {
 	IsLevelClear() bool
 }
 
+// 持有已解码音频数据的稳定句柄接口
+type IAudioBufferHandle interface {
+	// 返回音频采样格式
+	Format() beep.Format
+	// 返回一个从头播放到结尾的新音频流
+	Streamer() (beep.StreamSeeker, bool)
+}
+
 // 资源管理器接口
 type IResourceManager interface {
 	// 加载字体资源，如果命中缓存则直接返回已有字体
 	LoadFont(key defs.ResourceKey, pixelSize int, paths ...string) (IFont, error)
+	// 加载音效资源，如果命中缓存则直接返回已有 buffer
+	LoadSound(defs.ResourceKey, ...string) (IAudioBufferHandle, error)
+	// 加载音乐资源，如果命中缓存则直接返回已有 buffer
+	LoadMusic(defs.ResourceKey, ...string) (IAudioBufferHandle, error)
 }
 
 // 字符光栅化后写入atlas的缓存条目接口
@@ -89,4 +102,18 @@ type IFont interface {
 type IActionInput interface {
 	// 返回动作当前是否处于按下或持续按下状态
 	IsActionDown(actionID defs.ActionID) bool
+}
+
+// 音效播放器接口
+type IAudioPlayer interface {
+	// 播放全局音效
+	PlaySound(defs.ResourceKey, ...string) error
+	// 播放带 2D 空间参数的音效
+	PlaySound2D(defs.ResourceKey, mgl32.Vec2, mgl32.Vec2, ...string) error
+}
+
+// 相机接口
+type ICamera interface {
+	// 返回当前位置
+	Position() mgl32.Vec2
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"tiny_farm/engine/abstract"
+	"tiny_farm/engine/audio"
 	"tiny_farm/engine/input"
 	"tiny_farm/engine/render"
 	"tiny_farm/engine/resource"
@@ -18,6 +19,7 @@ type Context struct {
 	inputManager    *input.InputManager
 	renderer        *render.Renderer
 	resourceManager *resource.ResourceManager
+	audioPlayer     *audio.AudioPlayer
 	camera          *render.Camera
 	dispatcher      *dispatch.Dispatcher
 	gameState       abstract.IGameState
@@ -29,6 +31,7 @@ func NewContext(
 	inputManager *input.InputManager,
 	renderer *render.Renderer,
 	resourceManager *resource.ResourceManager,
+	audioPlayer *audio.AudioPlayer,
 	camera *render.Camera,
 	dispatcher *dispatch.Dispatcher,
 	gameState abstract.IGameState,
@@ -40,6 +43,8 @@ func NewContext(
 		return nil, errors.New("renderer is nil")
 	case resourceManager == nil:
 		return nil, errors.New("resource manager is nil")
+	case audioPlayer == nil:
+		return nil, errors.New("audio player is nil")
 	case camera == nil:
 		return nil, errors.New("camera is nil")
 	case dispatcher == nil:
@@ -52,6 +57,7 @@ func NewContext(
 		inputManager:    inputManager,
 		renderer:        renderer,
 		resourceManager: resourceManager,
+		audioPlayer:     audioPlayer,
 		camera:          camera,
 		dispatcher:      dispatcher,
 		gameState:       gameState,
@@ -71,6 +77,11 @@ func (c *Context) Renderer() *render.Renderer {
 // 获取资源管理器
 func (c *Context) ResourceManager() *resource.ResourceManager {
 	return c.resourceManager
+}
+
+// 获取音频播放器
+func (c *Context) AudioPlayer() *audio.AudioPlayer {
+	return c.audioPlayer
 }
 
 // 获取当前世界相机

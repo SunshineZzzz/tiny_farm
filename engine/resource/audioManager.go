@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"tiny_farm/engine/abstract"
 
 	"github.com/gopxl/beep/v2"
 	"github.com/gopxl/beep/v2/mp3"
@@ -22,41 +23,47 @@ type AudioBufferHandle struct {
 	// 解码后的音频采样缓存
 	buffer *beep.Buffer
 	// 音频采样格式
+	// format.SampleRate，音频采样率，每秒钟从连续声音信号中“取样”的次数，单位是 Hz（赫兹）
+	// 简单理解，采样率 = 每秒采集多少个“声音快照”
+	// format.NumChannels，音频通道数，1 是单声道，2 是立体声
 	format beep.Format
 	// 音频来源路径
 	sourcePath string
 }
+
+// 确保AudioBufferHandle实现IAudioBufferHandle接口
+var _ abstract.IAudioBufferHandle = (*AudioBufferHandle)(nil)
 
 // 管理音效和音乐资源的解码缓存
 //
 // 当前只负责把文件解码进内存 buffer，具体播放链路留给后续 AudioPlayer
 type audioManager struct {
 	// 音效缓存
-	sounds map[ResourceKey]AudioBufferHandle
+	sounds map[ResourceKey]*AudioBufferHandle
 	// 背景音乐缓存
-	music map[ResourceKey]AudioBufferHandle
+	music map[ResourceKey]*AudioBufferHandle
 }
 
 // 创建音频资源管理器
 func newAudioManager() *audioManager {
 	return &audioManager{
-		sounds: make(map[ResourceKey]AudioBufferHandle),
-		music:  make(map[ResourceKey]AudioBufferHandle),
+		sounds: make(map[ResourceKey]*AudioBufferHandle),
+		music:  make(map[ResourceKey]*AudioBufferHandle),
 	}
 }
 
 // 获取音效资源，未加载时尝试加载 key 或 paths[0]
-func (m *audioManager) loadSound(key ResourceKey, paths ...string) (AudioBufferHandle, error) {
+func (m *audioManager) loadSound(key ResourceKey, paths ...string) (*AudioBufferHandle, error) {
 	if m == nil {
-		return AudioBufferHandle{}, errors.New("audio manager is nil")
+		return nil, errors.New("audio manager is nil")
 	}
 	return m.loadAudio(m.sounds, "sound", key, paths...)
 }
 
 // 加载音乐并按 key 缓存
-func (m *audioManager) loadMusic(key ResourceKey, paths ...string) (AudioBufferHandle, error) {
+func (m *audioManager) loadMusic(key ResourceKey, paths ...string) (*AudioBufferHandle, error) {
 	if m == nil {
-		return AudioBufferHandle{}, errors.New("audio manager is nil")
+		return nil, errors.New("audio manager is nil")
 	}
 	return m.loadAudio(m.music, "music", key, paths...)
 }
@@ -82,7 +89,7 @@ func (m *audioManager) clearSounds() {
 	if m == nil {
 		return
 	}
-	m.sounds = make(map[ResourceKey]AudioBufferHandle)
+	m.sounds = make(map[ResourceKey]*AudioBufferHandle)
 }
 
 // 清空全部音乐缓存
@@ -90,7 +97,7 @@ func (m *audioManager) clearMusic() {
 	if m == nil {
 		return
 	}
-	m.music = make(map[ResourceKey]AudioBufferHandle)
+	m.music = make(map[ResourceKey]*AudioBufferHandle)
 }
 
 // 清空全部音频缓存
@@ -103,9 +110,9 @@ func (m *audioManager) clear() {
 }
 
 // 加载音频文件并写入指定缓存
-func (m *audioManager) loadAudio(cache map[ResourceKey]AudioBufferHandle, kind string, key ResourceKey, paths ...string) (AudioBufferHandle, error) {
+func (m *audioManager) loadAudio(cache map[ResourceKey]*AudioBufferHandle, kind string, key ResourceKey, paths ...string) (*AudioBufferHandle, error) {
 	if key == "" {
-		return AudioBufferHandle{}, fmt.Errorf("%s key is empty", kind)
+		return nil, fmt.Errorf("%s key is empty", kind)
 	}
 	if handle, ok := cache[key]; ok && handle.buffer != nil {
 		return handle, nil
@@ -116,12 +123,12 @@ func (m *audioManager) loadAudio(cache map[ResourceKey]AudioBufferHandle, kind s
 		path = paths[0]
 	}
 	if path == "" {
-		return AudioBufferHandle{}, fmt.Errorf("%s %q path is empty", kind, key)
+		return nil, fmt.Errorf("%s %q path is empty", kind, key)
 	}
 
 	handle, err := decodeAudioFile(path)
 	if err != nil {
-		return AudioBufferHandle{}, fmt.Errorf("load %s %q from %q: %w", kind, key, path, err)
+		return nil, fmt.Errorf("load %s %q from %q: %w", kind, key, path, err)
 	}
 	cache[key] = handle
 	return handle, nil
@@ -137,16 +144,16 @@ func getAudio(cache map[ResourceKey]AudioBufferHandle, key ResourceKey) (AudioBu
 }
 
 // 解码音频文件到内存 buffer
-func decodeAudioFile(path string) (AudioBufferHandle, error) {
+func decodeAudioFile(path string) (*AudioBufferHandle, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return AudioBufferHandle{}, err
+		return nil, err
 	}
 	defer file.Close()
 
 	streamer, format, err := decodeAudioStream(file, path)
 	if err != nil {
-		return AudioBufferHandle{}, err
+		return nil, err
 	}
 	// 关闭音频流，确保解码器内部资源及时释放
 	defer streamer.Close()
@@ -156,10 +163,10 @@ func decodeAudioFile(path string) (AudioBufferHandle, error) {
 	buffer := beep.NewBuffer(format)
 	buffer.Append(streamer)
 	if err := streamer.Err(); err != nil {
-		return AudioBufferHandle{}, err
+		return nil, err
 	}
 
-	return AudioBufferHandle{
+	return &AudioBufferHandle{
 		buffer:     buffer,
 		format:     format,
 		sourcePath: path,
@@ -168,6 +175,10 @@ func decodeAudioFile(path string) (AudioBufferHandle, error) {
 
 // 按扩展名选择解码器
 func decodeAudioStream(file *os.File, path string) (beep.StreamSeekCloser, beep.Format, error) {
+	// xxx.Decode(f)
+	// It simply returns a streamer that does the reading and decoding on-line (when needed).
+	// The main consequence/gotcha is that you can't close the file f before you finish streaming it.
+
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".wav":
 		streamer, format, err := wav.Decode(file)
@@ -218,6 +229,16 @@ func (h *AudioBufferHandle) Format() beep.Format {
 	return h.format
 }
 
+// 返回一个从头播放到结尾的新音频流
+//
+// 每次调用都会创建独立 streamer，确保同一缓存可以并发播放多次
+func (h *AudioBufferHandle) Streamer() (beep.StreamSeeker, bool) {
+	if h == nil || h.buffer == nil {
+		return nil, false
+	}
+	return h.buffer.Streamer(0, h.buffer.Len()), true
+}
+
 // 返回音频来源路径
 func (h *AudioBufferHandle) SourcePath() string {
 	return h.sourcePath
@@ -240,7 +261,7 @@ func (m *audioManager) musicDebugInfo() []AudioDebugInfo {
 }
 
 // 返回按 key 排序的音频调试信息
-func audioDebugInfo(cache map[ResourceKey]AudioBufferHandle) []AudioDebugInfo {
+func audioDebugInfo(cache map[ResourceKey]*AudioBufferHandle) []AudioDebugInfo {
 	if len(cache) == 0 {
 		return nil
 	}

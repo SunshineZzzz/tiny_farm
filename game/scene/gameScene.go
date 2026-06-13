@@ -2,10 +2,12 @@ package scene
 
 import (
 	"errors"
+	"log/slog"
 
 	ectx "tiny_farm/engine/context"
 	esystem "tiny_farm/engine/ecs/system"
 	escene "tiny_farm/engine/scene"
+	"tiny_farm/engine/utils/defs"
 	gfactory "tiny_farm/game/factory"
 	gsystem "tiny_farm/game/system"
 
@@ -24,6 +26,8 @@ type GameScene struct {
 	movementSystem *esystem.MovementSystem
 	// 实体删除系统
 	removeEntitySystem *esystem.RemoveEntitySystem
+	// 音频事件系统
+	audioSystem *esystem.AudioSystem
 	// 渲染系统
 	renderSystem *esystem.RenderSystem
 	// 标记场景资源和运行时状态是否已经初始化
@@ -59,11 +63,19 @@ func (s *GameScene) Init() error {
 	s.playerControlSystem = gsystem.NewPlayerControlSystem(64.0)
 	s.movementSystem = esystem.NewMovementSystem()
 	s.removeEntitySystem = esystem.NewRemoveEntitySystem()
+	audioSystem, err := esystem.NewAudioSystem(s.world, s.context.Dispatcher(), s.context.AudioPlayer(), s.context.Camera())
+	if err != nil {
+		s.Close()
+		return err
+	}
+	s.audioSystem = audioSystem
 	s.renderSystem = esystem.NewRenderSystem()
+
 	if _, err := gfactory.CreatePlayer(s.world); err != nil {
 		s.Close()
 		return err
 	}
+	s.playSceneMusic()
 	s.initialized = true
 	return nil
 }
@@ -99,6 +111,22 @@ func (s *GameScene) Close() {
 	s.playerControlSystem = nil
 	s.movementSystem = nil
 	s.removeEntitySystem = nil
+	if s.audioSystem != nil {
+		s.audioSystem.Close()
+		s.audioSystem = nil
+	}
 	s.renderSystem = nil
 	s.initialized = false
+}
+
+// 播放当前场景的临时背景音乐
+//
+// 当前作为音频系统首版验证入口，后续应由正式场景配置或状态机决定播放哪首音乐
+func (s *GameScene) playSceneMusic() {
+	if s == nil || s.context == nil || s.context.AudioPlayer() == nil {
+		return
+	}
+	if err := s.context.AudioPlayer().PlayMusic(defs.ResourceKey("scene-bg-music"), true, 0); err != nil {
+		slog.Warn("play scene music failed", slog.Any("err", err))
+	}
 }

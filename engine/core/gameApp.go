@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	"tiny_farm/engine/abstract"
+	"tiny_farm/engine/audio"
 	ectx "tiny_farm/engine/context"
 	"tiny_farm/engine/input"
 	"tiny_farm/engine/render"
@@ -43,6 +44,8 @@ type GameApp struct {
 	renderer *render.Renderer
 	// 统一管理资源加载、缓存和释放
 	resourceManager *resource.ResourceManager
+	// 控制音效、音乐和音频播放参数
+	audioPlayer *audio.AudioPlayer
 	// 负责文本测量和绘制
 	textRenderer *render.TextRenderer
 	// 当前帧使用的世界相机
@@ -312,6 +315,10 @@ func (a *GameApp) init() error {
 		return err
 	}
 
+	if err := a.initAudioPlayer(); err != nil {
+		return err
+	}
+
 	if err := a.initTextRenderer(); err != nil {
 		return err
 	}
@@ -348,6 +355,7 @@ func (a *GameApp) initRuntimeContext() error {
 		a.inputManager,
 		a.renderer,
 		a.resourceManager,
+		a.audioPlayer,
 		a.camera,
 		a.dispatcher,
 		a.gameState,
@@ -538,6 +546,22 @@ func (a *GameApp) initResourceManager() error {
 	return nil
 }
 
+// 初始化音频播放器
+//
+// 当前资源管理器已经完成 sound/music 预加载，播放器只负责把缓存转换成播放实例
+func (a *GameApp) initAudioPlayer() error {
+	if a.resourceManager == nil {
+		return errors.New("resource manager is nil")
+	}
+	player, err := audio.NewAudioPlayer(a.resourceManager, audio.DefaultConfigPath)
+	if err != nil {
+		return err
+	}
+	a.audioPlayer = player
+	slog.Debug("audio player init success")
+	return nil
+}
+
 // 初始化文本渲染器
 func (a *GameApp) initTextRenderer() error {
 	textRenderer, err := render.NewTextRenderer(a.resourceManager, a.renderer, a.dispatcher)
@@ -587,6 +611,11 @@ func (a *GameApp) close() {
 	a.inputManager = nil
 
 	a.demoTexture = nil
+
+	if a.audioPlayer != nil {
+		a.audioPlayer.Close()
+		a.audioPlayer = nil
+	}
 
 	if a.resourceManager != nil {
 		a.resourceManager.Clear()

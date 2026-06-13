@@ -181,17 +181,17 @@ func (m *ResourceManager) FontDebugInfo() []FontDebugInfo {
 }
 
 // 加载音效资源，如果命中缓存则直接返回已有 buffer
-func (m *ResourceManager) LoadSound(key ResourceKey, paths ...string) (AudioBufferHandle, error) {
+func (m *ResourceManager) LoadSound(key ResourceKey, paths ...string) (abstract.IAudioBufferHandle, error) {
 	if m == nil || m.audio == nil {
-		return AudioBufferHandle{}, errors.New("resource manager audio manager is nil")
+		return nil, errors.New("resource manager audio manager is nil")
 	}
 	return m.audio.loadSound(key, paths...)
 }
 
 // 加载音乐资源，如果命中缓存则直接返回已有 buffer
-func (m *ResourceManager) LoadMusic(key ResourceKey, paths ...string) (AudioBufferHandle, error) {
+func (m *ResourceManager) LoadMusic(key ResourceKey, paths ...string) (abstract.IAudioBufferHandle, error) {
 	if m == nil || m.audio == nil {
-		return AudioBufferHandle{}, errors.New("resource manager audio manager is nil")
+		return nil, errors.New("resource manager audio manager is nil")
 	}
 	return m.audio.loadMusic(key, paths...)
 }
