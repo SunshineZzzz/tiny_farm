@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	"sort"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -91,4 +92,14 @@ func ParseHexColor(value string) (mgl32.Vec4, error) {
 		float32((parsed>>8)&0xFF) / 255.0,
 		float32(parsed&0xFF) / 255.0,
 	}, nil
+}
+
+// 返回字符串键按字典序排列后的快照
+func SortedKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

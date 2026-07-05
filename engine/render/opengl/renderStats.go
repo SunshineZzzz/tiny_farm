@@ -1,10 +1,12 @@
 package opengl
 
-import "github.com/go-gl/mathgl/mgl32"
+import (
+	"github.com/go-gl/mathgl/mgl32"
+)
 
 // 单个渲染 pass 的上一帧统计
 //
-// 当前只记录 CPU 可直接得到的提交规模，用于后续 DebugPanel 或日志查看
+// 记录 CPU 侧可直接统计的提交规模，供 DebugPanel 或日志读取
 type PassStats struct {
 	// 本 pass 是否启用
 	Enabled bool
@@ -76,7 +78,7 @@ type DebugTextures struct {
 
 // spriteBatch 当前队列的提交规模
 //
-// 当前只在 pass flush 前临时读取，不跨帧保存
+// 在各 pass flush 前读取，不跨帧保存
 type spriteBatchStats struct {
 	// 当前批处理队列预计提交的 draw call 数量
 	drawCalls int

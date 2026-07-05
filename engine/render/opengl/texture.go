@@ -9,6 +9,7 @@ import (
 	_ "image/png"
 	"os"
 
+	"tiny_farm/engine/abstract"
 	"tiny_farm/engine/utils"
 	gl "tiny_farm/engine/utils/opengl"
 
@@ -17,7 +18,7 @@ import (
 
 // 纹理采样过滤方式
 //
-// 当前用于区分普通像素风贴图和后续字体 atlas 这类动态纹理
+// 用于区分像素风资源和字体 atlas 等需要平滑采样的动态纹理
 type TextureFilter uint32
 
 const (
@@ -29,7 +30,7 @@ const (
 
 // OpenGL 纹理资源
 //
-// 当前阶段只保存最小绘制所需的句柄和像素尺寸，资源生命周期由创建它的 GLRenderer 管理
+// 保存绘制所需的句柄、像素尺寸和创建上下文，资源生命周期由创建它的 GLRenderer 管理
 type Texture struct {
 	// OpenGL 上下文
 	glCtx gl.Context
@@ -41,6 +42,9 @@ type Texture struct {
 	// 纹理文件路径
 	path string
 }
+
+// 确保 Texture 实现 IOpenGLTexture 接口
+var _ abstract.IOpenGLTexture = (*Texture)(nil)
 
 // 返回底层 OpenGL texture 句柄
 func (t *Texture) ID() uint32 {
@@ -72,7 +76,9 @@ func (t *Texture) Close() {
 
 // 更新纹理指定区域的 RGBA 像素，x 和 y 使用左上原点语义
 //
-// 当前用于后续字体 atlas 按 glyph 增量写入，pixels 必须是 width*height*4 字节
+// - x, y：要写入的区域左上角，按项目里的“左上角为原点”语义
+// - width, height：要更新的区域大小
+// - pixels：RGBA 字节数组，长度必须是 width * height * 4
 func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error {
 	if t == nil || t.glCtx == nil || t.id == 0 {
 		return errors.New("texture is nil")
@@ -103,7 +109,7 @@ func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error {
 
 // 从图像文件创建 OpenGL texture
 //
-// 当前沿用参考实现的 NEAREST 和 CLAMP_TO_EDGE，优先保证像素风资源不糊边
+// 使用最近邻采样和边缘钳制，避免像素风资源模糊或采到边界外颜色
 func newTexture(glCtx gl.Context, path string) (*Texture, error) {
 	if glCtx == nil {
 		return nil, errors.New("gl context is nil")
@@ -164,7 +170,7 @@ func newTexture(glCtx gl.Context, path string) (*Texture, error) {
 
 // 创建一张空 RGBA OpenGL texture
 //
-// 当前主要服务后续字体 atlas，调用方负责在不再使用时 Close
+// 调用方负责在纹理不再使用时调用 Close
 func newEmptyTexture(glCtx gl.Context, width, height int32, filter TextureFilter) (*Texture, error) {
 	if glCtx == nil {
 		return nil, errors.New("gl context is nil")

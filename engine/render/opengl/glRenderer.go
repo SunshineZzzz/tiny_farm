@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 
+	"tiny_farm/engine/utils/defs"
 	gl "tiny_farm/engine/utils/opengl"
 
 	"github.com/SunshineZzzz/purego-sdl3/sdl"
@@ -12,7 +13,7 @@ import (
 
 // OpenGL 渲染器
 //
-// 当前只持有 SDL OpenGL 上下文和游戏逻辑尺寸，具体绘制入口后续再补
+// 持有 OpenGL 上下文、各渲染 pass 和逻辑分辨率，负责组织整帧渲染流程
 type GLRenderer struct {
 	// 管理 SDL OpenGL 上下文
 	renderCtx *renderContext
@@ -143,7 +144,7 @@ func (gr *GLRenderer) initViewportManager(rc *renderContext, logicalSize mgl32.V
 	sdl.GetWindowSizeInPixels(rc.window, &w, &h)
 	windowSize := mgl32.Vec2{float32(w), float32(h)}
 
-	// ViewportManager管理窗口大小。其中逻辑分辨率会自动计算带信箱效果的视口（letterboxed viewport）。
+	// 根据窗口像素尺寸和逻辑分辨率维护 letterbox 视口
 	vm, err := newViewportManager(rc.glContext, windowSize, logicalSize)
 	if err != nil {
 		return nil, err
@@ -151,7 +152,7 @@ func (gr *GLRenderer) initViewportManager(rc *renderContext, logicalSize mgl32.V
 	return vm, nil
 }
 
-// 初始化当前阶段共用的临时混合状态
+// 初始化各渲染 pass 共用的混合状态
 //
 // 现在 ScenePass、CompositePass 和 UIPass 都沿用普通 alpha blend，先放在 GLRenderer 统一设置
 // Lighting、Emissive、Bloom 等 pass 按自己的绘制语义显式设置 OpenGL 状态
@@ -289,7 +290,7 @@ func (gr *GLRenderer) AddDirectionalLight(direction mgl32.Vec2, color mgl32.Vec4
 
 // 清空当前帧的默认帧缓冲
 //
-// 当前阶段先清默认 framebuffer 的黑边区域，再切到场景 FBO 清理场景内容
+// 先清理默认帧缓冲的黑边区域，再清理各离屏 pass
 func (gr *GLRenderer) Clear() {
 	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
 		return
@@ -314,9 +315,8 @@ func (gr *GLRenderer) Clear() {
 	}
 }
 
-// 绘制一个逻辑坐标系下的纯色矩形
+// 将逻辑坐标系纯色矩形加入场景队列
 func (gr *GLRenderer) DrawRect(rect mgl32.Vec4, color mgl32.Vec4) error {
-	// 检查参数是否有效
 	if gr == nil || gr.scenePass == nil {
 		return errors.New("gl renderer or scene pass is nil")
 	}
@@ -375,14 +375,14 @@ func (gr *GLRenderer) DrawLine(start, end mgl32.Vec2, thickness float32, color m
 	return gr.scenePass.queueQuad(points, color)
 }
 
-// 绘制一个逻辑坐标系下的贴图矩形
+// 使用归一化 UV 范围和原始纹理颜色将贴图加入场景队列
 //
 // uvRect 按左上原点语义传入，(0,0) 表示纹理左上，(1,1) 表示纹理右下
 func (gr *GLRenderer) DrawTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
 	return gr.DrawTextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
 }
 
-// 绘制一个带颜色调制的逻辑坐标系贴图矩形
+// 使用归一化 UV 范围和单色调制将贴图加入场景队列
 func (gr *GLRenderer) DrawTextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if gr == nil || gr.scenePass == nil {
 		return errors.New("gl renderer or scene pass is nil")
@@ -394,8 +394,8 @@ func (gr *GLRenderer) DrawTextureColor(texture *Texture, dstRect mgl32.Vec4, uvR
 	return gr.scenePass.queueTextureColor(texture, dstRect, uvRect, color)
 }
 
-// 绘制一个带颜色参数的逻辑坐标系贴图矩形
-func (gr *GLRenderer) DrawTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 使用归一化 UV 范围和单色或顶点渐变将贴图加入场景队列
+func (gr *GLRenderer) DrawTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if gr == nil || gr.scenePass == nil {
 		return errors.New("gl renderer or scene pass is nil")
 	}
@@ -406,7 +406,9 @@ func (gr *GLRenderer) DrawTextureColorOptions(texture *Texture, dstRect mgl32.Ve
 	return gr.scenePass.queueTextureColorOptions(texture, dstRect, uvRect, color)
 }
 
-// 绘制一个逻辑坐标系下的贴图源矩形
+// 将纹理像素源矩形转换为 UV 后加入场景队列
+//
+// srcRect 格式为 {x, y, width, height}，以纹理左上角为原点
 func (gr *GLRenderer) DrawTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
 	uvRect, err := textureSourceRectUV(texture, srcRect)
 	if err != nil {
@@ -415,7 +417,7 @@ func (gr *GLRenderer) DrawTextureSourceRect(texture *Texture, dstRect mgl32.Vec4
 	return gr.DrawTexture(texture, dstRect, uvRect)
 }
 
-// 绘制一个逻辑坐标系下的自发光纯色矩形
+// 将逻辑坐标系纯色矩形加入自发光队列
 func (gr *GLRenderer) DrawEmissiveRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	if gr == nil || gr.emissivePass == nil {
 		return errors.New("gl renderer or emissive pass is nil")
@@ -426,7 +428,7 @@ func (gr *GLRenderer) DrawEmissiveRect(rect mgl32.Vec4, color mgl32.Vec4) error 
 	return gr.emissivePass.queueRect(rect, color)
 }
 
-// 绘制一个逻辑坐标系下的自发光贴图矩形
+// 使用归一化 UV 范围将贴图加入自发光队列
 func (gr *GLRenderer) DrawEmissiveTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if gr == nil || gr.emissivePass == nil {
 		return errors.New("gl renderer or emissive pass is nil")
@@ -440,7 +442,7 @@ func (gr *GLRenderer) DrawEmissiveTexture(texture *Texture, dstRect mgl32.Vec4, 
 	return gr.emissivePass.queueTexture(texture, dstRect, uvRect, color)
 }
 
-// 绘制一个逻辑坐标系下的自发光贴图源矩形
+// 将纹理像素源矩形转换为 UV 后加入自发光队列
 func (gr *GLRenderer) DrawEmissiveTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4) error {
 	uvRect, err := textureSourceRectUV(texture, srcRect)
 	if err != nil {
@@ -449,7 +451,7 @@ func (gr *GLRenderer) DrawEmissiveTextureSourceRect(texture *Texture, dstRect mg
 	return gr.DrawEmissiveTexture(texture, dstRect, uvRect, color)
 }
 
-// 绘制一个 UI 逻辑坐标系下的纯色矩形
+// 将 UI 逻辑坐标系纯色矩形加入 UI 队列
 func (gr *GLRenderer) DrawUIRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	if gr == nil || gr.uiPass == nil {
 		return errors.New("gl renderer or ui pass is nil")
@@ -460,12 +462,12 @@ func (gr *GLRenderer) DrawUIRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	return gr.uiPass.queueRect(rect, color)
 }
 
-// 绘制一个 UI 逻辑坐标系下的贴图矩形
+// 使用归一化 UV 范围和原始纹理颜色将贴图加入 UI 队列
 func (gr *GLRenderer) DrawUITexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
 	return gr.DrawUITextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
 }
 
-// 绘制一个带颜色调制的 UI 逻辑坐标系贴图矩形
+// 使用归一化 UV 范围和单色调制将贴图加入 UI 队列
 func (gr *GLRenderer) DrawUITextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if gr == nil || gr.uiPass == nil {
 		return errors.New("gl renderer or ui pass is nil")
@@ -476,8 +478,8 @@ func (gr *GLRenderer) DrawUITextureColor(texture *Texture, dstRect mgl32.Vec4, u
 	return gr.uiPass.queueTextureColor(texture, dstRect, uvRect, color)
 }
 
-// 绘制一个带颜色参数的 UI 逻辑坐标系贴图矩形
-func (gr *GLRenderer) DrawUITextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 使用归一化 UV 范围和单色或顶点渐变将贴图加入 UI 队列
+func (gr *GLRenderer) DrawUITextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if gr == nil || gr.uiPass == nil {
 		return errors.New("gl renderer or ui pass is nil")
 	}
@@ -487,13 +489,31 @@ func (gr *GLRenderer) DrawUITextureColorOptions(texture *Texture, dstRect mgl32.
 	return gr.uiPass.queueTextureColorOptions(texture, dstRect, uvRect, color)
 }
 
-// 绘制一个 UI 逻辑坐标系下的贴图源矩形
+// 将纹理像素源矩形转换为 UV 后加入 UI 队列
+//
+// srcRect 格式为 {x, y, width, height}，以纹理左上角为原点
 func (gr *GLRenderer) DrawUITextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
 	uvRect, err := textureSourceRectUV(texture, srcRect)
 	if err != nil {
 		return err
 	}
 	return gr.DrawUITexture(texture, dstRect, uvRect)
+}
+
+// 将带单色调制的纹理像素源矩形转换为 UV 后加入 UI 队列
+//
+// flipped 为 true 时交换左右 UV，实现水平翻转
+func (gr *GLRenderer) DrawUITextureSourceRectColor(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4, flipped bool) error {
+	uvRect, err := textureSourceRectUV(texture, srcRect)
+	if err != nil {
+		return err
+	}
+	// dstRect = {x, y, width, height}
+	// uvRect  = {left, top, right, bottom}
+	if flipped {
+		uvRect[0], uvRect[2] = uvRect[2], uvRect[0]
+	}
+	return gr.DrawUITextureColor(texture, dstRect, uvRect, color)
 }
 
 // 从图像文件创建可绘制纹理
@@ -507,7 +527,7 @@ func (gr *GLRenderer) LoadTexture(path string) (*Texture, error) {
 
 // 创建一张空白可绘制纹理
 //
-// 当前用于后续字体 atlas 这类运行时写入纹理
+// 纹理初始内容为空，可通过 UpdateRGBA 增量写入像素
 func (gr *GLRenderer) CreateEmptyTexture(width, height int32, filter TextureFilter) (*Texture, error) {
 	if gr == nil || gr.renderCtx == nil || gr.renderCtx.glContext == nil {
 		return nil, errors.New("gl renderer context is nil")

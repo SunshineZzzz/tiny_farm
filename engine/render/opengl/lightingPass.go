@@ -52,14 +52,43 @@ type lightCommand struct {
 	spotInnerCos float32
 	// 聚光灯外锥角余弦值，夹角余弦小于该值时完全不照
 	spotOuterCos float32
-	// 投影轴方向，沿该方向的投影值越大，遮罩越接近1，越亮
-	// 注意：它不是物理平行光的“照射方向”，而是屏幕空间明暗渐变的方向
+	// 这里的方向光，不是 3D 游戏里那种，太阳从天上照下来、照到每个物体上的光，不是 3D 平行光那种按物体法线逐像素照明，
+	// 而是给整张屏幕盖一层颜色，一侧亮、一侧暗，中间由 smoothstep 柔和过渡。
+
+	// direction 使用逻辑坐标（左上原点，向右向下为正），例如 {-0.7, -1.0} 表示左上方向，
+	// 存入 dir2D 时 Y 取反对齐 UV；绘制时再按宽高比修正后送入 shader 的 uDir2D。
+	//
+	// dir2D 只决定渐变轴怎么斜，亮侧/暗侧、分界位置、过渡宽度由 dirOffset、dirSoftness 与 t 共同决定。
+	//
+	// 哪边亮哪边暗?
+	// t = dot(normalize(dir2d), uv - 0.5) + 0.5
+	// 2D 平行光方向向量 dir2D，找一条和 dir2D 点积为 0 的向量，这条线就是明暗分界线，分界线一侧 dot > 0，更亮，另一侧 dot < 0，更暗。
+	//
+	// float edge0 = clamp(offset - softness, 0.0, 1.0);
+	// float edge1 = clamp(offset + softness, 0.0, 1.0);
+	// float ramp = smoothstep(edge0, edge1, t);
+	//
+	// edge0 = offset - softness // 开始变亮的 t
+	// edge1 = offset + softness // 变亮结束的 t
+	// 把 t 想成一根 0~1 的尺子：
+	// t 轴:  0 -------- edge0 ---- offset ---- edge1 -------- 1
+	//            全暗区      过渡带（smoothstep）      全亮区
+	// smoothstep 规则（就三条）
+	// t <= edge0   →  ramp = 0      全暗
+	// t >= edge1   →  ramp = 1      全亮
+	// edge0 < t < edge1  →  ramp 在 0~1 之间平滑上升（不是直线，是弯的）
+	//
+	// return mix(ramp, 1.0, middayBlend);
+	// mix(a, b, x) 是 GLSL 的线性插值
+	//
+	// rgb = uLightColor * (uLightIntensity * dirMask);
+	// 写入 light 纹理的值 = 光颜色 × 光强 × dirMask
 	dir2D mgl32.Vec2
-	// 方向光明暗过渡中心位置，范围为 0 到 1
+	// 方向光明暗过渡中心位置，范围为 0.0 到 1.0
 	dirOffset float32
-	// 方向光明暗过渡柔和宽度，范围为 0 到 0.5
+	// 方向光明暗过渡柔和宽度，范围为 0.0 到 0.5
 	dirSoftness float32
-	// 正午混合强度，越接近 1 越接近全屏均匀照亮
+	// 正午混合强度，越接近 1.0 越接近全屏均匀照亮
 	middayBlend float32
 }
 
@@ -531,7 +560,7 @@ func (p *lightingPass) applyCommandUniforms(command lightCommand) {
 // 绘制一条光源命令
 func (p *lightingPass) drawCommand(command lightCommand) error {
 	var rect mgl32.Vec4
-	viewProj := mgl32.Ortho(0, p.size.X(), p.size.Y(), 0, -1, 1)
+	viewProj := mgl32.Ortho(0, p.size.X(), p.size.Y(), 0, -1.0, 1.0)
 	if command.lightType == lightTypeDirectional {
 		// 如果是方向光, 就画满整个光照缓冲
 		rect = mgl32.Vec4{0.0, 0.0, p.size.X(), p.size.Y()}

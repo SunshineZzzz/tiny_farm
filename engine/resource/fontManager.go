@@ -120,7 +120,15 @@ type fontAtlasPage struct {
 type Font struct {
 	// 字体资源语义 key
 	key ResourceKey
-	// 字体像素字号
+	// 字体像素字号，比如：24px
+	// 字体里的 24px 通常对应的是字体的 em size，也就是字体设计坐标被缩放到 24 像素这个规格
+	// em size 不是某个字的实际宽高，而是字体系统用来计算这些东西的基准
+	// 字形缩放比例
+	// 基线位置
+	// 上升高度 ascender
+	// 下降深度 descender
+	// 行高 line height
+	// 字符前进距离 advance
 	pixelSize int
 	// 字体来源路径
 	sourcePath string
@@ -130,6 +138,7 @@ type Font struct {
 	renderer *render.Renderer
 	// 解析后的字体对象
 	parsed *opentype.Font
+	// 字体面：某个字体文件在指定字号、指定渲染配置下生成出来的可用字体对象。
 	// 指定字号后的字体面
 	face xfont.Face
 	// HarfBuzz 使用的字体面
@@ -243,11 +252,9 @@ func (f *Font) GlyphByIndex(index uint32) (*FontGlyph, error) {
 		return nil, fmt.Errorf("glyph index %d is out of range in font %q", index, f.key)
 	}
 
+	// 类型转换为 sfnt.GlyphIndex 类型
 	glyphIndex := sfnt.GlyphIndex(index)
 	// 将像素字号转换为 fixed.Int26_6，后面的字体度量和光栅化都按照该尺寸进行
-	// ppem 则决定这个坐标基准映射到多少像素：
-	// pixels per em，1 em = 1000 个字体设计单位
-	// ppem = 16，意思是：1000 个字体设计单位 → 16 个像素
 	ppem := fixed.I(f.pixelSize)
 	// 当前字形画完以后，光标应该向右移动多少距离
 	advance, err := f.parsed.GlyphAdvance(&f.sfntBuffer, glyphIndex, ppem, xfont.HintingFull)
@@ -271,8 +278,11 @@ func (f *Font) GlyphByIndex(index uint32) (*FontGlyph, error) {
 		Advance: fixedToFloat32(advance),
 	}
 
+	// 在字体渲染场景里，dr 很可能是某个字形 glyph 的绘制区域。这个判断通常是为了跳过空字形。
 	if dr.Dx() > 0 && dr.Dy() > 0 {
+		// 把字体光栅化出来的 mask 转成 RGBA 像素数据。
 		pixels := glyphMaskToRGBA(mask, maskp, dr)
+		// 在字体图集 atlas 里，为这个字形申请一块区域。
 		page, position, err := f.allocateAtlasRegion(int32(dr.Dx()), int32(dr.Dy()))
 		if err != nil {
 			return nil, err
@@ -412,6 +422,10 @@ func (f *Font) rasterizeGlyph(index sfnt.GlyphIndex, ppem fixed.Int26_6) (image.
 }
 
 // 给glyph位图分配atlas区域
+// return:
+// *fontAtlasPage，表示分配到的 atlas 页。字体 atlas 可能不止一张纹理，一张放满了就新建下一张。这个返回值告诉调用方：这次 glyph 应该写进哪一张 atlas 纹理。
+// mgl32.Vec2，表示 glyph 位图在这张 atlas 纹理里的 写入位置，也就是左上角坐标。
+// error，表示分配失败的原因。
 func (f *Font) allocateAtlasRegion(width, height int32) (*fontAtlasPage, mgl32.Vec2, error) {
 	if width <= 0 || height <= 0 {
 		return nil, mgl32.Vec2{}, errors.New("glyph atlas region size is invalid")
@@ -448,10 +462,12 @@ func (f *Font) allocateAtlasRegion(width, height int32) (*fontAtlasPage, mgl32.V
 
 	// 新页大小至少是默认atlas大小；如果glyph特别大，就创建一个能放下它的更大页面
 	pageSize := max(f.atlasPageSize, max(paddedWidth, paddedHeight))
+	// 创建一张 pageSize x pageSize 的空纹理，并加入 f.atlasPages。
 	_, err := f.createAtlasPage(pageSize)
 	if err != nil {
 		return nil, mgl32.Vec2{}, err
 	}
+	// 递归调用，为新创建的 atlas 页分配区域。
 	return f.allocateAtlasRegion(width, height)
 }
 
@@ -522,20 +538,21 @@ func (m *fontManager) loadFont(key ResourceKey, pixelSize int, paths ...string) 
 	if err != nil {
 		return nil, fmt.Errorf("parse font %q from %q: %w", key, path, err)
 	}
-	// 根据已经解析的字体文件，创建一个指定字号和渲染参数的“字体面”
+	// 从“字体文件数据”变成“可渲染字体面”
 	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
-		Size: float64(pixelSize),
-		// 每英寸像素数，用于把字体尺寸换算成像素
+		// 字体点数
 		//
-		// point 是物理尺寸：
-		// 1 英寸 = 72 point
-		// 像素取决于屏幕 DPI：
-		// 像素数 = point × DPI / 72
-		// 所以 16 point：
-		// - 72 DPI：16 × 72 / 72 = 16px
-		// - 96 DPI：16 × 96 / 72 ≈ 21.33px
-		// - 144 DPI：16 × 144 / 72 = 32px
-		// 因此，只有在 72 DPI 下，16pt 才等于 16px
+		// point，pt，排版常用长度单位，1 pt = 1/72 英寸，1英寸 = 约 2.54 厘米
+		// DPI，dots per inch，在当前语境下，就是PPI，Pixels Per Inch，每英寸多少像素/点，常见 72、96、144 等
+		// pixel，px，屏幕上的最小显示单位
+		//
+		// 像素大小（px）= 字号（pt）× PPI ÷ 72 = pixelSize
+		// 所以当 DPI = 72 时，Size = pixelSize 就等价于：1 point ≈ 1 像素。
+		// 这样 pixelSize = 16 就是 16px 字号，直观好配。
+		Size: float64(pixelSize),
+		// 配合 Size 决定 em size
+		// 例如 Size = 16，DPI = 96：
+		// px = 16 × (96 ÷ 72) = 16 × 1.333... ≈ 21.3 像素
 		DPI: 72,
 		// 启用完整 hinting，让较小字号的字形尽量对齐像素网格
 		Hinting: xfont.HintingFull,
@@ -551,8 +568,17 @@ func (m *fontManager) loadFont(key ResourceKey, pixelSize int, paths ...string) 
 	// 创建 HarfBuzz 字体实例
 	shapingFont := harfbuzz.NewFont(shapingFace)
 	// 设置字号，单位是 point
+	// 项目把 pixelSize 直接放进去，是因为整体约定使用 DPI = 72，让 pt 数值和 px 数值 1:1
 	shapingFont.Ptem = float32(pixelSize)
 	// 横向、纵向排版尺寸。乘 64 这是为了与 FreeType 等字体系统的 1/64px 单位保持一致。
+	// HarfBuzz 很多位置数据不是直接用 float 像素，而是用 26.6 fixed point，也就是：
+	// 1px = 64 个单位
+	// 为什么要乘 64？
+	// 因为字体排版需要亚像素精度。比如一个 glyph 的 advance 可能不是整数像素：
+	// 7.5px
+	// 用 1/64px 表示就是：
+	// 7.5 * 64 = 480
+	// 这样可以用整数保存更精细的位置，避免浮点误差，也符合 FreeType/HarfBuzz 常用格式。
 	shapingFont.XScale = int32(pixelSize * 64)
 	shapingFont.YScale = int32(pixelSize * 64)
 	// 获取字体度量信息
@@ -683,8 +709,8 @@ func glyphMaskToRGBA(mask image.Image, maskp image.Point, dr image.Rectangle) []
 	width := dr.Dx()
 	height := dr.Dy()
 	pixels := make([]byte, width*height*4)
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
+	for y := range height {
+		for x := range width {
 			alpha := color.AlphaModel.Convert(mask.At(maskp.X+x, maskp.Y+y)).(color.Alpha).A
 			index := (y*width + x) * 4
 			pixels[index+0] = 255

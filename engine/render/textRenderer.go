@@ -47,96 +47,14 @@ const (
 	textDirectionBottomToTop
 )
 
-// 文本渲染可选参数接口
-type iTextArg interface {
-	// 保证传参合法而已，不需要具体实现
-	dummy()
-}
-
-// 控制文本布局的基础参数
-type LayoutOptions struct {
-	// 字符额外间距，单位像素
-	LetterSpacing float32
-	// 行距缩放，0.0表示使用1.0
-	LineSpacingScale float32
-	// 字形缩放，0.0分量表示使用1.0
-	GlyphScale mgl32.Vec2
-}
-
-// 保证传参合法而已，不需要具体实现
-func (*LayoutOptions) dummy() {}
-
-// 确保LayoutOptions实现iTextArg接口
-var _ iTextArg = (*LayoutOptions)(nil)
-
-// 控制文本阴影绘制
-type ShadowOptions struct {
-	// 是否绘制阴影
-	Enabled bool
-	// 阴影相对文字位置的偏移，单位像素
-	Offset mgl32.Vec2
-	// 阴影颜色
-	Color mgl32.Vec4
-}
-
-// 控制一次文本绘制的颜色和布局
-type TextRenderParams struct {
-	// 文字颜色或渐变参数
-	Color ColorOptions
-	// 阴影参数
-	Shadow *ShadowOptions
-	// 布局参数
-	Layout *LayoutOptions
-}
-
-// 保证传参合法而已，不需要具体实现
-func (*TextRenderParams) dummy() {}
-
-// 确保TextRenderParams实现iTextArg接口
-var _ iTextArg = (*TextRenderParams)(nil)
-
-// 文本样式 key 参数
-type TextStyleKey string
-
-// 保证传参合法而已，不需要具体实现
-func (TextStyleKey) dummy() {}
-
-// 确保TextStyleKey实现iTextArg接口
-var _ iTextArg = TextStyleKey("")
-
-// 在样式基础上覆盖本次文本绘制参数
-type TextRenderOverrides struct {
-	// 覆盖文字颜色或渐变参数，nil表示使用样式颜色
-	Color *ColorOptions
-	// 覆盖阴影参数，nil表示使用样式阴影
-	Shadow *ShadowOptions
-	// 覆盖布局参数，nil表示使用样式布局
-	Layout *LayoutOptions
-}
-
-// 保证传参合法而已，不需要具体实现
-func (*TextRenderOverrides) dummy() {}
-
-// 确保TextRenderOverrides实现iTextArg接口
-var _ iTextArg = (*TextRenderOverrides)(nil)
-
-// 字体路径参数，未传时默认使用 fontKey 字符串
-type FontPath string
-
-// 保证传参合法而已，不需要具体实现
-func (FontPath) dummy() {}
-
-// 确保FontPath实现iTextArg接口
-var _ iTextArg = FontPath("")
-
 // 保存一条文本样式配置
 type TextStyleEntry struct {
 	// 文字颜色或渐变参数
-	Color ColorOptions
+	Color defs.ColorOptions
 	// 阴影参数
-	Shadow *ShadowOptions
+	Shadow *defs.ShadowOptions
 	// 布局参数
-	Layout *LayoutOptions
+	Layout *defs.LayoutOptions
 }
 
 // 文本布局缓存键，对应的value是textLayout
@@ -194,34 +112,6 @@ type textLayout struct {
 	lineCount int
 }
 
-// 对应 text_render.json 根节点
-type textRenderConfigFile struct {
-	// 文本渲染器配置节点
-	TextRenderer textRenderConfig `json:"text_renderer"`
-}
-
-// 对应 text_renderer 配置节点
-type textRenderConfig struct {
-	// 文本方向配置
-	Direction string `json:"direction"`
-	// 默认文本方向配置
-	DefaultDirection string `json:"default_direction"`
-	// 文本语言标签
-	Language string `json:"language"`
-	// HarfBuzz feature 配置
-	// "features": ["kern=1", "liga=1", "clig=1"]
-	// kern=1：开启字偶距
-	// liga=1：开启标准连字，比如 fi
-	// clig=1：开启上下文连字
-	Features []string `json:"features"`
-	// 布局缓存容量
-	LayoutCacheCapacity *int `json:"layout_cache_capacity"`
-	// 默认样式 key 配置
-	DefaultStyleKeys textDefaultStyleKeysConfig `json:"default_style_keys"`
-	// 文本样式表
-	Styles map[string]textStyleConfig `json:"styles"`
-}
-
 // 对应默认样式 key 配置
 type textDefaultStyleKeysConfig struct {
 	// 默认 UI 文本样式 key
@@ -274,9 +164,37 @@ type textStyleConfig struct {
 	Layout *textLayoutConfig `json:"layout"`
 }
 
+// 对应 text_renderer 配置节点
+type textRenderConfig struct {
+	// 文本方向配置
+	Direction string `json:"direction"`
+	// 默认文本方向配置
+	DefaultDirection string `json:"default_direction"`
+	// 文本语言标签, 用于 HarfBuzz 排版
+	Language string `json:"language"`
+	// HarfBuzz feature 配置
+	// "features": ["kern=1", "liga=1", "clig=1"]
+	// kern=1：开启字偶距
+	// liga=1：开启标准连字，比如 fi
+	// clig=1：开启上下文连字
+	Features []string `json:"features"`
+	// 布局缓存容量
+	LayoutCacheCapacity *int `json:"layout_cache_capacity"`
+	// 默认样式 key 配置
+	DefaultStyleKeys textDefaultStyleKeysConfig `json:"default_style_keys"`
+	// 文本样式表
+	Styles map[string]textStyleConfig `json:"styles"`
+}
+
+// 对应 text_render.json 根节点
+type textRenderConfigFile struct {
+	// 文本渲染器配置节点
+	TextRenderer textRenderConfig `json:"text_renderer"`
+}
+
 // 描述文本渲染器当前缓存和样式状态
 //
-// 当前用于日志、测试和后续 Debug UI，不暴露具体布局缓存内容
+// 供日志、测试和 Debug UI 读取，不暴露具体布局缓存内容
 type TextRendererDebugInfo struct {
 	// 布局缓存容量上限
 	LayoutCacheCapacity int
@@ -323,6 +241,9 @@ type TextRenderer struct {
 	layoutRevision uint64
 }
 
+// 确保 TextRenderer 实现 ITextRenderer 接口
+var _ abstract.ITextRenderer = (*TextRenderer)(nil)
+
 // 创建文本渲染器
 func NewTextRenderer(resourceManager abstract.IResourceManager, renderer *Renderer, dispatcher *dispatch.Dispatcher) (*TextRenderer, error) {
 	if resourceManager == nil {
@@ -353,31 +274,31 @@ func NewTextRenderer(resourceManager abstract.IResourceManager, renderer *Render
 }
 
 // 测量已加载字体下的文本包围尺寸
-func (t *TextRenderer) MeasureText(text string, fontKey defs.ResourceKey, pixelSize int, otherArgs ...iTextArg) (mgl32.Vec2, error) {
+func (t *TextRenderer) MeasureText(text string, fontKey defs.ResourceKey, pixelSize int, otherArgs ...abstract.ITextArg) (mgl32.Vec2, error) {
 	fontPath := string(fontKey)
-	var styleKey TextStyleKey
-	var params *TextRenderParams
-	var overrides *TextRenderOverrides
-	var options *LayoutOptions
+	var styleKey defs.TextStyleKey
+	var params *defs.TextRenderParams
+	var overrides *defs.TextRenderOverrides
+	var options *defs.LayoutOptions
 	styleProvided := false
 	layoutProvided := false
 	for _, arg := range otherArgs {
 		switch value := arg.(type) {
-		case FontPath:
+		case defs.FontPath:
 			fontPath = string(value)
-		case TextStyleKey:
+		case defs.TextStyleKey:
 			styleKey = value
 			styleProvided = true
-		case *LayoutOptions:
+		case *defs.LayoutOptions:
 			options = value
 			layoutProvided = true
-		case *TextRenderParams:
+		case *defs.TextRenderParams:
 			params = value
 			if value != nil {
 				options = value.Layout
 				layoutProvided = value.Layout != nil
 			}
-		case *TextRenderOverrides:
+		case *defs.TextRenderOverrides:
 			overrides = value
 		}
 	}
@@ -390,27 +311,27 @@ func (t *TextRenderer) MeasureText(text string, fontKey defs.ResourceKey, pixelS
 }
 
 // 绘制 UI 逻辑坐标系文本
-func (t *TextRenderer) DrawUIText(text string, fontKey defs.ResourceKey, pixelSize int, position mgl32.Vec2, otherArgs ...iTextArg) error {
+func (t *TextRenderer) DrawUIText(text string, fontKey defs.ResourceKey, pixelSize int, position mgl32.Vec2, otherArgs ...abstract.ITextArg) error {
 	fontPath := string(fontKey)
-	var styleKey TextStyleKey
-	var params *TextRenderParams
-	var overrides *TextRenderOverrides
+	var styleKey defs.TextStyleKey
+	var params *defs.TextRenderParams
+	var overrides *defs.TextRenderOverrides
 	styleKeyProvided := false
 	paramsProvided := false
 	for _, arg := range otherArgs {
 		switch value := arg.(type) {
-		case FontPath:
+		case defs.FontPath:
 			fontPath = string(value)
-		case TextStyleKey:
+		case defs.TextStyleKey:
 			styleKey = value
 			styleKeyProvided = true
-		case *TextRenderParams:
+		case *defs.TextRenderParams:
 			params = value
 			paramsProvided = true
-		case *LayoutOptions:
-			params = &TextRenderParams{Layout: value}
+		case *defs.LayoutOptions:
+			params = &defs.TextRenderParams{Layout: value}
 			paramsProvided = true
-		case *TextRenderOverrides:
+		case *defs.TextRenderOverrides:
 			overrides = value
 		}
 	}
@@ -420,27 +341,27 @@ func (t *TextRenderer) DrawUIText(text string, fontKey defs.ResourceKey, pixelSi
 }
 
 // 绘制世界坐标系文本
-func (t *TextRenderer) DrawWorldText(text string, fontKey defs.ResourceKey, pixelSize int, position mgl32.Vec2, otherArgs ...iTextArg) error {
+func (t *TextRenderer) DrawWorldText(text string, fontKey defs.ResourceKey, pixelSize int, position mgl32.Vec2, otherArgs ...abstract.ITextArg) error {
 	fontPath := string(fontKey)
-	var styleKey TextStyleKey
-	var params *TextRenderParams
-	var overrides *TextRenderOverrides
+	var styleKey defs.TextStyleKey
+	var params *defs.TextRenderParams
+	var overrides *defs.TextRenderOverrides
 	styleKeyProvided := false
 	paramsProvided := false
 	for _, arg := range otherArgs {
 		switch value := arg.(type) {
-		case FontPath:
+		case defs.FontPath:
 			fontPath = string(value)
-		case TextStyleKey:
+		case defs.TextStyleKey:
 			styleKey = value
 			styleKeyProvided = true
-		case *TextRenderParams:
+		case *defs.TextRenderParams:
 			params = value
 			paramsProvided = true
-		case *LayoutOptions:
-			params = &TextRenderParams{Layout: value}
+		case *defs.LayoutOptions:
+			params = &defs.TextRenderParams{Layout: value}
 			paramsProvided = true
-		case *TextRenderOverrides:
+		case *defs.TextRenderOverrides:
 			overrides = value
 		}
 	}
@@ -452,7 +373,7 @@ func (t *TextRenderer) DrawWorldText(text string, fontKey defs.ResourceKey, pixe
 // 绘制一段文本，可按参数决定使用 UI 坐标或世界坐标
 //
 // 当前先绘制阴影再绘制正文，阴影复用同一套 glyph 布局
-func (t *TextRenderer) drawText(text string, fontKey defs.ResourceKey, pixelSize int, position mgl32.Vec2, fontPath string, params *TextRenderParams, ui bool) error {
+func (t *TextRenderer) drawText(text string, fontKey defs.ResourceKey, pixelSize int, position mgl32.Vec2, fontPath string, params *defs.TextRenderParams, ui bool) error {
 	if text == "" {
 		return nil
 	}
@@ -465,7 +386,7 @@ func (t *TextRenderer) drawText(text string, fontKey defs.ResourceKey, pixelSize
 	}
 	if params.Shadow != nil && params.Shadow.Enabled {
 		shadowPosition := position.Add(params.Shadow.Offset)
-		if err := t.drawTextLayout(layout, shadowPosition, solidTextColorOptions(params.Shadow.Color), ui); err != nil {
+		if err := t.drawTextLayout(layout, shadowPosition, defs.SolidTextColorOptions(params.Shadow.Color), ui); err != nil {
 			return err
 		}
 	}
@@ -475,7 +396,7 @@ func (t *TextRenderer) drawText(text string, fontKey defs.ResourceKey, pixelSize
 // 提交已经布局好的 glyph 绘制命令
 //
 // layout 中的矩形是相对文本起点的坐标，这里叠加 position 生成最终绘制位置
-func (t *TextRenderer) drawTextLayout(layout *textLayout, position mgl32.Vec2, color ColorOptions, ui bool) error {
+func (t *TextRenderer) drawTextLayout(layout *textLayout, position mgl32.Vec2, color defs.ColorOptions, ui bool) error {
 	if layout == nil {
 		return nil
 	}
@@ -502,8 +423,8 @@ func (t *TextRenderer) drawTextLayout(layout *textLayout, position mgl32.Vec2, c
 
 // 获取文本布局，优先复用缓存
 //
-// 当前缓存 key 与 copy_source 对齐到 fontKey、字号、文本和布局参数
-func (t *TextRenderer) layoutText(text string, fontKey defs.ResourceKey, pixelSize int, fontPath string, options *LayoutOptions) (*textLayout, error) {
+// 缓存键包含字体、字号、文本和全部布局参数
+func (t *TextRenderer) layoutText(text string, fontKey defs.ResourceKey, pixelSize int, fontPath string, options *defs.LayoutOptions) (*textLayout, error) {
 	if t == nil || t.resourceManager == nil {
 		return nil, errors.New("text renderer resource manager is nil")
 	}
@@ -636,20 +557,45 @@ func (t *TextRenderer) SetTextStyle(key string, style TextStyleEntry) error {
 	if t == nil {
 		return errors.New("text renderer is nil")
 	}
-	if strings.TrimSpace(key) == "" {
+
+	key = strings.TrimSpace(key)
+	if key == "" {
 		return errors.New("text style key is empty")
 	}
+
 	if t.styles == nil {
 		t.styles = make(map[string]TextStyleEntry)
 	}
-	t.styles[key] = cloneTextStyleEntry(TextStyleEntry{
+
+	resolved := cloneTextStyleEntry(TextStyleEntry{
 		Color:  normalizeTextColorOptions(style.Color),
 		Shadow: style.Shadow,
 		Layout: normalizeLayoutOptions(style.Layout),
 	})
+
+	previous, exists := t.styles[key]
+	t.styles[key] = resolved
+
+	// 新增样式不会影响已有文本布局
+	if !exists {
+		return nil
+	}
+
+	// 只修改颜色或阴影不会影响文本布局
+	if layoutOptionsEqual(previous.Layout, resolved.Layout) {
+		return nil
+	}
+
 	t.layoutRevision++
 	t.ClearLayoutCache()
 	return nil
+}
+
+// 比较规范化后的文本布局参数
+func layoutOptionsEqual(left, right *defs.LayoutOptions) bool {
+	resolvedLeft := normalizeLayoutOptions(left)
+	resolvedRight := normalizeLayoutOptions(right)
+	return *resolvedLeft == *resolvedRight
 }
 
 // 查询文本样式
@@ -877,8 +823,8 @@ func (t *TextRenderer) ensureBuiltinTextStyles() {
 		return
 	}
 	style := TextStyleEntry{
-		Color: solidTextColorOptions(mgl32.Vec4{1.0, 1.0, 1.0, 1.0}),
-		Shadow: &ShadowOptions{
+		Color: defs.SolidTextColorOptions(mgl32.Vec4{1.0, 1.0, 1.0, 1.0}),
+		Shadow: &defs.ShadowOptions{
 			Enabled: true,
 			Offset:  mgl32.Vec2{1.0, 1.0},
 			Color:   mgl32.Vec4{0.0, 0.0, 0.0, 1.0},
@@ -891,7 +837,7 @@ func (t *TextRenderer) ensureBuiltinTextStyles() {
 
 // 解析单条文本样式配置
 func parseTextStyleConfig(config textStyleConfig) (TextStyleEntry, error) {
-	color := solidTextColorOptions(mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+	color := defs.SolidTextColorOptions(mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
 	if strings.TrimSpace(config.Color.StartColor) != "" {
 		parsed, err := utils.ParseHexColor(config.Color.StartColor)
 		if err != nil {
@@ -914,7 +860,7 @@ func parseTextStyleConfig(config textStyleConfig) (TextStyleEntry, error) {
 		color.AngleRadians = config.Color.AngleDegrees * float32(math.Pi) / 180.0
 	}
 
-	var shadow *ShadowOptions
+	var shadow *defs.ShadowOptions
 	if config.Shadow != nil {
 		shadowColor := mgl32.Vec4{0.0, 0.0, 0.0, 1.0}
 		if strings.TrimSpace(config.Shadow.Color) != "" {
@@ -924,7 +870,7 @@ func parseTextStyleConfig(config textStyleConfig) (TextStyleEntry, error) {
 			}
 			shadowColor = parsed
 		}
-		shadow = &ShadowOptions{
+		shadow = &defs.ShadowOptions{
 			Enabled: config.Shadow.Enabled,
 			Offset:  mgl32.Vec2{config.Shadow.Offset[0], config.Shadow.Offset[1]},
 			Color:   shadowColor,
@@ -933,7 +879,7 @@ func parseTextStyleConfig(config textStyleConfig) (TextStyleEntry, error) {
 
 	layout := normalizeLayoutOptions(nil)
 	if config.Layout != nil {
-		layout = normalizeLayoutOptions(&LayoutOptions{
+		layout = normalizeLayoutOptions(&defs.LayoutOptions{
 			LetterSpacing:    config.Layout.LetterSpacing,
 			LineSpacingScale: config.Layout.LineSpacingScale,
 			GlyphScale:       mgl32.Vec2{config.Layout.GlyphScale[0], config.Layout.GlyphScale[1]},
@@ -964,8 +910,9 @@ func cloneTextStyleEntry(style TextStyleEntry) TextStyleEntry {
 }
 
 // 解析测量使用的布局参数
-func (t *TextRenderer) resolveMeasureLayoutOptions(styleKey TextStyleKey, params *TextRenderParams, overrides *TextRenderOverrides, options *LayoutOptions, styleProvided bool, layoutProvided bool) *LayoutOptions {
-	var resolved *LayoutOptions
+func (t *TextRenderer) resolveMeasureLayoutOptions(styleKey defs.TextStyleKey, params *defs.TextRenderParams,
+	overrides *defs.TextRenderOverrides, options *defs.LayoutOptions, styleProvided bool, layoutProvided bool) *defs.LayoutOptions {
+	var resolved *defs.LayoutOptions
 	if t != nil && styleProvided {
 		if style, ok := t.styles[string(styleKey)]; ok {
 			resolved = style.Layout
@@ -984,9 +931,9 @@ func (t *TextRenderer) resolveMeasureLayoutOptions(styleKey TextStyleKey, params
 }
 
 // 根据默认样式、显式样式和覆盖参数解析本次绘制参数
-func (t *TextRenderer) resolveTextRenderParams(styleKey TextStyleKey, params *TextRenderParams, overrides *TextRenderOverrides,
-	ui bool, styleKeyProvided bool, paramsProvided bool) *TextRenderParams {
-	var resolved *TextRenderParams
+func (t *TextRenderer) resolveTextRenderParams(styleKey defs.TextStyleKey, params *defs.TextRenderParams, overrides *defs.TextRenderOverrides,
+	ui bool, styleKeyProvided bool, paramsProvided bool) *defs.TextRenderParams {
+	var resolved *defs.TextRenderParams
 	if t != nil {
 		key := ""
 		if styleKeyProvided {
@@ -999,7 +946,7 @@ func (t *TextRenderer) resolveTextRenderParams(styleKey TextStyleKey, params *Te
 		}
 		if key != "" {
 			if style, ok := t.styles[key]; ok {
-				resolved = &TextRenderParams{
+				resolved = &defs.TextRenderParams{
 					Color:  style.Color,
 					Shadow: style.Shadow,
 					Layout: style.Layout,
@@ -1010,7 +957,7 @@ func (t *TextRenderer) resolveTextRenderParams(styleKey TextStyleKey, params *Te
 					fallbackKey = t.defaultUIStyleKey
 				}
 				if style, ok := t.styles[fallbackKey]; ok {
-					resolved = &TextRenderParams{
+					resolved = &defs.TextRenderParams{
 						Color:  style.Color,
 						Shadow: style.Shadow,
 						Layout: style.Layout,
@@ -1020,10 +967,10 @@ func (t *TextRenderer) resolveTextRenderParams(styleKey TextStyleKey, params *Te
 		}
 	}
 	if resolved == nil {
-		resolved = &TextRenderParams{}
+		resolved = &defs.TextRenderParams{}
 	}
 	if params != nil {
-		if params.Color != (ColorOptions{}) {
+		if params.Color != (defs.ColorOptions{}) {
 			resolved.Color = params.Color
 		}
 		if params.Shadow != nil {
@@ -1048,7 +995,7 @@ func (t *TextRenderer) resolveTextRenderParams(styleKey TextStyleKey, params *Te
 }
 
 // 创建布局缓存键
-func makeLayoutKey(text string, fontKey defs.ResourceKey, pixelSize int, options *LayoutOptions) layoutKey {
+func makeLayoutKey(text string, fontKey defs.ResourceKey, pixelSize int, options *defs.LayoutOptions) layoutKey {
 	return layoutKey{
 		fontKey:          fontKey,
 		pixelSize:        pixelSize,
@@ -1063,7 +1010,7 @@ func makeLayoutKey(text string, fontKey defs.ResourceKey, pixelSize int, options
 // 使用指定字体生成文本布局
 //
 // 当前通过 HarfBuzz 把每行文本转换成 glyph index 序列，再按 glyph 度量生成绘制矩形
-func (t *TextRenderer) buildTextLayout(text string, font abstract.IFont, options *LayoutOptions) (*textLayout, error) {
+func (t *TextRenderer) buildTextLayout(text string, font abstract.IFont, options *defs.LayoutOptions) (*textLayout, error) {
 	if font == nil {
 		return nil, errors.New("font is nil")
 	}
@@ -1104,7 +1051,7 @@ func (t *TextRenderer) buildTextLayout(text string, font abstract.IFont, options
 
 // 塑形一行文本
 // 对单行文本执行 HarfBuzz shaping 并写入 glyph 绘制位置
-func (t *TextRenderer) shapeLine(line string, font abstract.IFont, options *LayoutOptions, baselineY float32, outGlyphs *[]glyphPlacement) (float32, error) {
+func (t *TextRenderer) shapeLine(line string, font abstract.IFont, options *defs.LayoutOptions, baselineY float32, outGlyphs *[]glyphPlacement) (float32, error) {
 	if line == "" {
 		return 0, nil
 	}
@@ -1230,9 +1177,9 @@ func minLineValue(current, value float32, initialized bool) float32 {
 }
 
 // 规范化文本绘制参数
-func normalizeTextRenderParams(params *TextRenderParams) *TextRenderParams {
+func normalizeTextRenderParams(params *defs.TextRenderParams) *defs.TextRenderParams {
 	if params == nil {
-		params = &TextRenderParams{}
+		params = &defs.TextRenderParams{}
 	} else {
 		copied := *params
 		params = &copied
@@ -1243,16 +1190,8 @@ func normalizeTextRenderParams(params *TextRenderParams) *TextRenderParams {
 	return params
 }
 
-// 使用单色生成文本颜色参数
-func solidTextColorOptions(color mgl32.Vec4) ColorOptions {
-	return ColorOptions{
-		StartColor: color,
-		EndColor:   color,
-	}
-}
-
 // 补全文本颜色参数默认值
-func normalizeTextColorOptions(options ColorOptions) ColorOptions {
+func normalizeTextColorOptions(options defs.ColorOptions) defs.ColorOptions {
 	resolved := options
 	if resolved.StartColor == (mgl32.Vec4{}) {
 		resolved.StartColor = mgl32.Vec4{1.0, 1.0, 1.0, 1.0}
@@ -1264,9 +1203,9 @@ func normalizeTextColorOptions(options ColorOptions) ColorOptions {
 }
 
 // 解析本次绘制最终使用的颜色参数
-func resolvedTextColorOptions(params *TextRenderParams) ColorOptions {
+func resolvedTextColorOptions(params *defs.TextRenderParams) defs.ColorOptions {
 	if params == nil {
-		return solidTextColorOptions(mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
+		return defs.SolidTextColorOptions(mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
 	}
 	return normalizeTextColorOptions(params.Color)
 }
@@ -1274,9 +1213,9 @@ func resolvedTextColorOptions(params *TextRenderParams) ColorOptions {
 // 规范化布局参数
 //
 // 当前把行高缩放和 glyph 缩放的零值分量视为 1，方便调用方使用结构体零值
-func normalizeLayoutOptions(options *LayoutOptions) *LayoutOptions {
+func normalizeLayoutOptions(options *defs.LayoutOptions) *defs.LayoutOptions {
 	if options == nil {
-		return &LayoutOptions{
+		return &defs.LayoutOptions{
 			LetterSpacing:    0.0,
 			LineSpacingScale: 1.0,
 			GlyphScale:       mgl32.Vec2{1.0, 1.0},

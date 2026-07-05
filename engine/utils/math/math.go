@@ -70,6 +70,16 @@ type Rect struct {
 	Size mgl32.Vec2
 }
 
+// 将矩形转换为依次包含 x、y、宽度和高度的四维向量
+func (r Rect) RectToVec4() mgl32.Vec4 {
+	return mgl32.Vec4{
+		r.Position.X(),
+		r.Position.Y(),
+		r.Size.X(),
+		r.Size.Y(),
+	}
+}
+
 // 2维向量的元素最大值
 func Mgl32Vec2Max(a, b mgl32.Vec2) mgl32.Vec2 {
 	return mgl32.Vec2{
@@ -182,4 +192,30 @@ func SafeNormalizeVec2(v mgl32.Vec2, fallback mgl32.Vec2) mgl32.Vec2 {
 	}
 	invLen := float32(1.0 / math.Sqrt(float64(lenSq)))
 	return v.Mul(invLen)
+}
+
+// 按可用长度等比压缩一对边距，避免两侧区域发生重叠
+func ClampPair(first, second, available float32) (float32, float32) {
+	total := first + second
+	if total <= available || total <= 0.0 {
+		return first, second
+	}
+	scale := available / total
+	return first * scale, second * scale
+}
+
+// 将四个浮点分量转换为四维向量，长度不符时返回回退值
+func Vec4FromFloat32s(values []float32, fallback mgl32.Vec4) mgl32.Vec4 {
+	if len(values) != 4 {
+		return fallback
+	}
+	return mgl32.Vec4{values[0], values[1], values[2], values[3]}
+}
+
+// 将两个浮点分量转换为二维向量，长度不符时返回回退值
+func Vec2FromFloat32s(values []float32, fallback mgl32.Vec2) mgl32.Vec2 {
+	if len(values) != 2 {
+		return fallback
+	}
+	return mgl32.Vec2{values[0], values[1]}
 }

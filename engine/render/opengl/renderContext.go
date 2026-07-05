@@ -116,14 +116,14 @@ func (rc *renderContext) createContext() error {
 		return fmt.Errorf("%s", sdl.GetError())
 	}
 
-	// 这一步不是“再创建一个 OpenGL context”。它只是创建一个 Go 侧的函数入口表对象，类似 GLAD loader 的承载结构。
+	// 创建 Go 侧 OpenGL 函数入口表，不会创建新的原生上下文
 	glContext, err := gl.NewDefaultContext()
 	if err != nil {
 		rc.clean()
 		return fmt.Errorf("%s", err)
 	}
 
-	// 等价于 gladLoadGLLoader(reinterpret_cast<GLADloadproc>(SDL_GL_GetProcAddress))
+	// 从当前 SDL OpenGL 上下文加载函数地址
 	if err := glContext.LoadFunctions(); err != nil {
 		rc.clean()
 		return fmt.Errorf("%s", err)
@@ -165,7 +165,7 @@ func (rc *renderContext) swapWindow() {
 	sdl.GLSwapWindow(rc.window)
 }
 
-// 设置交换间隔，1-表示启用垂直同步，0-表示立即交换
+// 设置交换间隔，1 表示启用垂直同步，0 表示立即交换
 func (rc *renderContext) setSwapInterval(interval int32) error {
 	if !sdl.GLSetSwapInterval(interval) {
 		return fmt.Errorf("%s", sdl.GetError())

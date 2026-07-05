@@ -19,6 +19,7 @@ engine/input                   SDL 输入事件和动作状态
 engine/resource                纹理、音频和字体加载与缓存
 engine/render                  相机、文本和通用渲染接口
 engine/render/opengl           OpenGL 渲染管线和渲染资源
+engine/ui                      UI 元素树、交互、按钮、预设和布局容器
 engine/utils/dispatch          事件分发器
 config                         窗口、渲染、输入和文本配置
 assets                         纹理、音频、字体、地图和数据资源

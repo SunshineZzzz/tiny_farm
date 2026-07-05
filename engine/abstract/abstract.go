@@ -56,8 +56,42 @@ type IAudioBufferHandle interface {
 	Streamer() (beep.StreamSeeker, bool)
 }
 
+// opengl纹理接口
+type IOpenGLTexture interface {
+	// 返回底层 OpenGL texture 句柄
+	ID() uint32
+	// 返回纹理像素尺寸
+	Size() mgl32.Vec2
+	// 释放纹理资源
+	Close()
+	// 更新纹理指定区域的 RGBA 像素，x 和 y 使用左上原点语义
+	//
+	// - x, y：要写入的区域左上角，按项目里的“左上角为原点”语义
+	// - width, height：要更新的区域大小
+	// - pixels：RGBA 字节数组，长度必须是 width * height * 4
+	UpdateRGBA(int32, int32, int32, int32, []byte) error
+}
+
+// 纹理接口
+type ITexture interface {
+	// 返回纹理像素尺寸
+	Size() mgl32.Vec2
+	// 释放纹理资源
+	Close()
+	// 更新纹理指定区域的 RGBA 像素，x 和 y 使用左上原点语义
+	//
+	// - x, y：要写入的区域左上角，按项目里的“左上角为原点”语义
+	// - width, height：要更新的区域大小
+	// - pixels：RGBA 字节数组，长度必须是 width * height * 4
+	UpdateRGBA(int32, int32, int32, int32, []byte) error
+	// 返回 opengl 纹理句柄
+	OpenGLTexture() IOpenGLTexture
+}
+
 // 资源管理器接口
 type IResourceManager interface {
+	// 加载纹理资源，如果命中缓存则直接返回已有纹理
+	LoadTexture(key defs.ResourceKey, paths ...string) (ITexture, error)
 	// 加载字体资源，如果命中缓存则直接返回已有字体
 	LoadFont(defs.ResourceKey, int, ...string) (IFont, error)
 	// 加载音效资源，如果命中缓存则直接返回已有 buffer
@@ -102,6 +136,16 @@ type IFont interface {
 type IActionInput interface {
 	// 返回动作当前是否处于按下或持续按下状态
 	IsActionDown(defs.ActionID) bool
+	// 返回动作是否在本帧刚按下
+	IsActionPressed(defs.ActionID) bool
+	// 返回动作是否在本帧刚释放
+	IsActionReleased(defs.ActionID) bool
+	// 返回游戏逻辑坐标系中的鼠标位置
+	LogicalMousePosition() mgl32.Vec2
+	// 返回指定动作状态的回调注册入口
+	//
+	// Inactive 不是可触发阶段；传入 Inactive 时会回退到 Pressed，避免调用方绑定到无效列表
+	OnAction(actionID defs.ActionID, state defs.ActionState) *defs.ActionSink
 }
 
 // 音效播放器接口
@@ -116,4 +160,42 @@ type IAudioPlayer interface {
 type ICamera interface {
 	// 返回当前位置
 	Position() mgl32.Vec2
+}
+
+// 渲染器接口
+type IRenderer interface {
+	// 绘制 UI 逻辑坐标系下的纯色矩形
+	DrawUIRect(mgl32.Vec4, mgl32.Vec4) error
+	// 使用纹理像素源矩形和单色调制绘制 UI 贴图
+	//
+	// srcRect 格式为 {x, y, width, height}，flipped 为 true 时水平翻转采样结果
+	DrawUITextureSourceRectColor(ITexture, mgl32.Vec4, mgl32.Vec4, mgl32.Vec4, bool) error
+}
+
+// 文本渲染可选参数接口
+type ITextArg interface {
+	// 保证传参合法而已，不需要具体实现
+	Dummy()
+}
+
+// 确保FontPath实现iTextArg接口
+var _ ITextArg = defs.FontPath("")
+
+// 确保TextRenderParams实现iTextArg接口
+var _ ITextArg = (*defs.TextRenderParams)(nil)
+
+// 确保TextStyleKey实现iTextArg接口
+var _ ITextArg = defs.TextStyleKey("")
+
+// 确保TextRenderOverrides实现iTextArg接口
+var _ ITextArg = (*defs.TextRenderOverrides)(nil)
+
+// 文本渲染器接口
+type ITextRenderer interface {
+	// 返回样式或布局配置变更版本
+	LayoutRevision() uint64
+	// 测量已加载字体下的文本包围尺寸
+	MeasureText(text string, fontKey defs.ResourceKey, pixelSize int, otherArgs ...ITextArg) (mgl32.Vec2, error)
+	// 绘制 UI 逻辑坐标系文本
+	DrawUIText(text string, fontKey defs.ResourceKey, pixelSize int, position mgl32.Vec2, otherArgs ...ITextArg) error
 }

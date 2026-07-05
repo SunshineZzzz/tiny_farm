@@ -4,7 +4,9 @@ import (
 	"errors"
 	"math"
 
+	"tiny_farm/engine/abstract"
 	"tiny_farm/engine/render/opengl"
+	"tiny_farm/engine/utils/defs"
 	emath "tiny_farm/engine/utils/math"
 
 	"github.com/SunshineZzzz/purego-sdl3/sdl"
@@ -13,7 +15,7 @@ import (
 
 // 渲染外观层
 //
-// 当前阶段继续通过 facade 隔离 game 层和 OpenGL 后端
+// 通过外观层隔离 game 层和 OpenGL 后端
 // 同时把 camera、世界坐标转换、可见区域裁剪和像素对齐收口到这一层
 type Renderer struct {
 	// 后端渲染器
@@ -26,6 +28,19 @@ type Renderer struct {
 	pixelSnapEnabled bool
 }
 
+// 确保 Renderer 实现 IRenderer 接口
+var _ abstract.IRenderer = (*Renderer)(nil)
+
+// 纹理采样过滤方式
+type TextureFilter = opengl.TextureFilter
+
+const (
+	// 最近邻采样，适合像素风资源
+	TextureFilterNearest = opengl.TextureFilterNearest
+	// 线性采样，适合字体 atlas 等需要柔和边缘的动态纹理
+	TextureFilterLinear = opengl.TextureFilterLinear
+)
+
 // 持有可绘制纹理句柄
 //
 // 当前只做最小包装，资源生命周期仍由创建它的 Renderer 管理
@@ -34,18 +49,8 @@ type Texture struct {
 	backend *opengl.Texture
 }
 
-// 纹理采样过滤方式
-type TextureFilter = opengl.TextureFilter
-
-// 控制单次绘制的颜色或顶点渐变
-type ColorOptions = opengl.ColorOptions
-
-const (
-	// 最近邻采样，适合像素风资源
-	TextureFilterNearest = opengl.TextureFilterNearest
-	// 线性采样，适合字体 atlas 等需要柔和边缘的动态纹理
-	TextureFilterLinear = opengl.TextureFilterLinear
-)
+// 确保 Texture 实现 ITexture 接口
+var _ abstract.ITexture = (*Texture)(nil)
 
 // 返回纹理像素尺寸
 func (t *Texture) Size() mgl32.Vec2 {
@@ -72,6 +77,11 @@ func (t *Texture) UpdateRGBA(x, y, width, height int32, pixels []byte) error {
 		return errors.New("texture is nil")
 	}
 	return t.backend.UpdateRGBA(x, y, width, height, pixels)
+}
+
+// 返回 opengl 纹理句柄
+func (t *Texture) OpenGLTexture() abstract.IOpenGLTexture {
+	return t.backend
 }
 
 // 渲染器上一帧统计
@@ -473,76 +483,82 @@ func (r *Renderer) DrawWorldCircleOutline(center mgl32.Vec2, radius float32, thi
 // 绘制逻辑坐标系下的贴图矩形
 //
 // uvRect 按左上原点语义传入，(0,0) 表示纹理左上，(1,1) 表示纹理右下
-func (r *Renderer) DrawTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+func (r *Renderer) DrawTexture(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
 	return r.DrawTextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
 }
 
-// 绘制带颜色调制的逻辑坐标系贴图矩形
-func (r *Renderer) DrawTextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+// 使用归一化 UV 范围和单色调制绘制逻辑坐标系贴图
+func (r *Renderer) DrawTextureColor(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawTextureColor(texture.backend, dstRect, uvRect, color)
+	return r.backend.DrawTextureColor(texture.OpenGLTexture().(*opengl.Texture), dstRect, uvRect, color)
 }
 
-// 绘制带颜色参数的逻辑坐标系贴图矩形
-func (r *Renderer) DrawTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 使用归一化 UV 范围和单色或顶点渐变绘制逻辑坐标系贴图
+func (r *Renderer) DrawTextureColorOptions(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawTextureColorOptions(texture.backend, dstRect, uvRect, color)
+	return r.backend.DrawTextureColorOptions(texture.OpenGLTexture().(*opengl.Texture), dstRect, uvRect, color)
 }
 
 // 绘制世界坐标系下的贴图矩形
-func (r *Renderer) DrawWorldTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+func (r *Renderer) DrawWorldTexture(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
 	return r.DrawWorldTextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
 }
 
-// 绘制带颜色调制的世界坐标系贴图矩形
-func (r *Renderer) DrawWorldTextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+// 使用归一化 UV 范围和单色调制绘制世界坐标系贴图
+//
+// 提交前会执行相机变换、可见区域裁剪和可选的像素对齐
+func (r *Renderer) DrawWorldTextureColor(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
 	logicalRect, ok := r.worldRectToLogical(dstRect)
 	if !ok {
 		return nil
 	}
-	return r.backend.DrawTextureColor(texture.backend, logicalRect, uvRect, color)
+	return r.backend.DrawTextureColor(texture.OpenGLTexture().(*opengl.Texture), logicalRect, uvRect, color)
 }
 
-// 绘制带颜色参数的世界坐标系贴图矩形
-func (r *Renderer) DrawWorldTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 使用归一化 UV 范围和单色或顶点渐变绘制世界坐标系贴图
+//
+// 提交前会执行相机变换、可见区域裁剪和可选的像素对齐
+func (r *Renderer) DrawWorldTextureColorOptions(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
 	logicalRect, ok := r.worldRectToLogical(dstRect)
 	if !ok {
 		return nil
 	}
-	return r.backend.DrawTextureColorOptions(texture.backend, logicalRect, uvRect, color)
+	return r.backend.DrawTextureColorOptions(texture.OpenGLTexture().(*opengl.Texture), logicalRect, uvRect, color)
 }
 
-// 绘制逻辑坐标系下的贴图源矩形
-func (r *Renderer) DrawTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
+// 使用纹理像素源矩形绘制逻辑坐标系贴图
+//
+// srcRect 格式为 {x, y, width, height}，以纹理左上角为原点
+func (r *Renderer) DrawTextureSourceRect(texture abstract.ITexture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawTextureSourceRect(texture.backend, dstRect, srcRect)
+	return r.backend.DrawTextureSourceRect(texture.OpenGLTexture().(*opengl.Texture), dstRect, srcRect)
 }
 
 // 绘制 UI 逻辑坐标系下的纯色矩形
@@ -553,57 +569,74 @@ func (r *Renderer) DrawUIRect(rect mgl32.Vec4, color mgl32.Vec4) error {
 	return r.backend.DrawUIRect(rect, color)
 }
 
-// 绘制 UI 逻辑坐标系下的贴图矩形
-func (r *Renderer) DrawUITexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
+// 使用归一化 UV 范围和原始纹理颜色绘制 UI 贴图
+func (r *Renderer) DrawUITexture(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4) error {
 	return r.DrawUITextureColor(texture, dstRect, uvRect, mgl32.Vec4{1.0, 1.0, 1.0, 1.0})
 }
 
-// 绘制带颜色调制的 UI 逻辑坐标系贴图矩形
-func (r *Renderer) DrawUITextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+// 使用归一化 UV 范围和单色调制绘制 UI 贴图
+func (r *Renderer) DrawUITextureColor(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawUITextureColor(texture.backend, dstRect, uvRect, color)
+	return r.backend.DrawUITextureColor(texture.OpenGLTexture().(*opengl.Texture), dstRect, uvRect, color)
 }
 
-// 绘制带颜色参数的 UI 逻辑坐标系贴图矩形
-func (r *Renderer) DrawUITextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 使用归一化 UV 范围和单色或顶点渐变绘制 UI 贴图
+func (r *Renderer) DrawUITextureColorOptions(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawUITextureColorOptions(texture.backend, dstRect, uvRect, color)
+	return r.backend.DrawUITextureColorOptions(texture.OpenGLTexture().(*opengl.Texture), dstRect, uvRect, color)
 }
 
-// 绘制 UI 逻辑坐标系下的贴图源矩形
-func (r *Renderer) DrawUITextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
+// 使用纹理像素源矩形和原始纹理颜色绘制 UI 贴图
+//
+// srcRect 格式为 {x, y, width, height}，以纹理左上角为原点
+func (r *Renderer) DrawUITextureSourceRect(texture abstract.ITexture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawUITextureSourceRect(texture.backend, dstRect, srcRect)
+	return r.backend.DrawUITextureSourceRect(texture.OpenGLTexture().(*opengl.Texture), dstRect, srcRect)
 }
 
-// 绘制世界坐标系下的贴图源矩形
-func (r *Renderer) DrawWorldTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
+// 使用纹理像素源矩形和单色调制绘制 UI 贴图
+//
+// srcRect 格式为 {x, y, width, height}，flipped 为 true 时水平翻转采样结果
+func (r *Renderer) DrawUITextureSourceRectColor(texture abstract.ITexture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4, flipped bool) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
+		return errors.New("texture is nil")
+	}
+	return r.backend.DrawUITextureSourceRectColor(texture.OpenGLTexture().(*opengl.Texture), dstRect, srcRect, color, flipped)
+}
+
+// 使用纹理像素源矩形绘制世界坐标系贴图
+//
+// srcRect 格式为 {x, y, width, height}，提交前会执行世界坐标变换和裁剪
+func (r *Renderer) DrawWorldTextureSourceRect(texture abstract.ITexture, dstRect mgl32.Vec4, srcRect mgl32.Vec4) error {
+	if r == nil || r.backend == nil {
+		return errors.New("renderer is nil")
+	}
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
 	logicalRect, ok := r.worldRectToLogical(dstRect)
 	if !ok {
 		return nil
 	}
-	return r.backend.DrawTextureSourceRect(texture.backend, logicalRect, srcRect)
+	return r.backend.DrawTextureSourceRect(texture.OpenGLTexture().(*opengl.Texture), logicalRect, srcRect)
 }
 
 // 绘制逻辑坐标系下的自发光纯色矩形
@@ -627,55 +660,55 @@ func (r *Renderer) DrawWorldEmissiveRect(rect mgl32.Vec4, color mgl32.Vec4) erro
 }
 
 // 绘制逻辑坐标系下的自发光贴图矩形
-func (r *Renderer) DrawEmissiveTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+func (r *Renderer) DrawEmissiveTexture(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawEmissiveTexture(texture.backend, dstRect, uvRect, color)
+	return r.backend.DrawEmissiveTexture(texture.OpenGLTexture().(*opengl.Texture), dstRect, uvRect, color)
 }
 
 // 绘制世界坐标系下的自发光贴图矩形
-func (r *Renderer) DrawWorldEmissiveTexture(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
+func (r *Renderer) DrawWorldEmissiveTexture(texture abstract.ITexture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
 	logicalRect, ok := r.worldRectToLogical(dstRect)
 	if !ok {
 		return nil
 	}
-	return r.backend.DrawEmissiveTexture(texture.backend, logicalRect, uvRect, color)
+	return r.backend.DrawEmissiveTexture(texture.OpenGLTexture().(*opengl.Texture), logicalRect, uvRect, color)
 }
 
 // 绘制逻辑坐标系下的自发光贴图源矩形
-func (r *Renderer) DrawEmissiveTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4) error {
+func (r *Renderer) DrawEmissiveTextureSourceRect(texture abstract.ITexture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
-	return r.backend.DrawEmissiveTextureSourceRect(texture.backend, dstRect, srcRect, color)
+	return r.backend.DrawEmissiveTextureSourceRect(texture.OpenGLTexture().(*opengl.Texture), dstRect, srcRect, color)
 }
 
 // 绘制世界坐标系下的自发光贴图源矩形
-func (r *Renderer) DrawWorldEmissiveTextureSourceRect(texture *Texture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4) error {
+func (r *Renderer) DrawWorldEmissiveTextureSourceRect(texture abstract.ITexture, dstRect mgl32.Vec4, srcRect mgl32.Vec4, color mgl32.Vec4) error {
 	if r == nil || r.backend == nil {
 		return errors.New("renderer is nil")
 	}
-	if texture == nil || texture.backend == nil {
+	if texture == nil || texture.OpenGLTexture() == nil {
 		return errors.New("texture is nil")
 	}
 	logicalRect, ok := r.worldRectToLogical(dstRect)
 	if !ok {
 		return nil
 	}
-	return r.backend.DrawEmissiveTextureSourceRect(texture.backend, logicalRect, srcRect, color)
+	return r.backend.DrawEmissiveTextureSourceRect(texture.OpenGLTexture().(*opengl.Texture), logicalRect, srcRect, color)
 }
 
 // 加载纹理
@@ -692,7 +725,7 @@ func (r *Renderer) LoadTexture(path string) (*Texture, error) {
 
 // 创建一张空白可绘制纹理
 //
-// 当前用于后续字体 atlas 这类运行时写入纹理
+// 纹理初始内容为空，可通过 UpdateRGBA 增量写入像素
 func (r *Renderer) CreateEmptyTexture(width, height int32, filter TextureFilter) (*Texture, error) {
 	if r == nil || r.backend == nil {
 		return nil, errors.New("renderer is nil")

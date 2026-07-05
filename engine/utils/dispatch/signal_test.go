@@ -169,7 +169,7 @@ func TestSignalReleaseDuringCollectSkipsReleasedCallback(t *testing.T) {
 	var signal Signal[int]
 	sink := signal.Sink()
 	var received []int
-	var first SignalConnection[int]
+	var first *SignalConnection[int]
 
 	first = sink.Connect(func() int {
 		return 1
@@ -286,7 +286,7 @@ func TestSignalNilCallbackIsIgnored(t *testing.T) {
 func TestSignalReleaseManyCallbacksKeepsRemainingCallbacks(t *testing.T) {
 	var signal Signal[int]
 	sink := signal.Sink()
-	connections := make([]SignalConnection[int], 0, 8)
+	connections := make([]*SignalConnection[int], 0, 8)
 	var received []int
 
 	for value := 0; value < 8; value++ {

@@ -20,6 +20,7 @@ type Context struct {
 	renderer        *render.Renderer
 	resourceManager *resource.ResourceManager
 	audioPlayer     *audio.AudioPlayer
+	textRenderer    *render.TextRenderer
 	camera          *render.Camera
 	dispatcher      *dispatch.Dispatcher
 	gameState       abstract.IGameState
@@ -32,6 +33,7 @@ func NewContext(
 	renderer *render.Renderer,
 	resourceManager *resource.ResourceManager,
 	audioPlayer *audio.AudioPlayer,
+	textRenderer *render.TextRenderer,
 	camera *render.Camera,
 	dispatcher *dispatch.Dispatcher,
 	gameState abstract.IGameState,
@@ -45,6 +47,8 @@ func NewContext(
 		return nil, errors.New("resource manager is nil")
 	case audioPlayer == nil:
 		return nil, errors.New("audio player is nil")
+	case textRenderer == nil:
+		return nil, errors.New("text renderer is nil")
 	case camera == nil:
 		return nil, errors.New("camera is nil")
 	case dispatcher == nil:
@@ -58,6 +62,7 @@ func NewContext(
 		renderer:        renderer,
 		resourceManager: resourceManager,
 		audioPlayer:     audioPlayer,
+		textRenderer:    textRenderer,
 		camera:          camera,
 		dispatcher:      dispatcher,
 		gameState:       gameState,
@@ -82,6 +87,11 @@ func (c *Context) ResourceManager() *resource.ResourceManager {
 // 获取音频播放器
 func (c *Context) AudioPlayer() *audio.AudioPlayer {
 	return c.audioPlayer
+}
+
+// 获取文本渲染器
+func (c *Context) TextRenderer() *render.TextRenderer {
+	return c.textRenderer
 }
 
 // 获取当前世界相机

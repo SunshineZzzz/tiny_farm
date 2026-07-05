@@ -9,7 +9,7 @@ import (
 
 // 封装 OpenGL 着色器程序的编译、链接和释放
 //
-// 当前阶段只支持从源码创建程序，后续引入资源系统后再扩展文件加载和热重载
+// 从内存源码创建程序，不负责文件加载或热重载
 type shaderProgram struct {
 	// OpenGL program 对象句柄
 	id uint32

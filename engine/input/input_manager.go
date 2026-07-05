@@ -3,6 +3,7 @@ package input
 import (
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -16,34 +17,12 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 )
 
-// 表示动作在当前帧里的输入状态
-//
-// 该状态同时用于选择回调列表；Inactive 只表示未激活，不作为可绑定回调阶段
-type ActionState int
-
-const (
-	// 动作在本帧刚被按下
-	Pressed ActionState = iota
-	// 动作已经持续按下
-	Held
-	// 动作在本帧刚被释放
-	Released
-	// 动作当前没有输入
-	Inactive
-)
-
 const (
 	// 动作状态数量
-	callbackStateCount = int(Inactive)
+	callbackStateCount = int(defs.Inactive)
 	// 默认输入映射配置路径
 	defaultConfigPath = "config/input.json"
 )
-
-// 表示动作回调的注册入口
-type ActionSink = dispatch.SignalSink[bool]
-
-// 表示一条可释放的动作回调连接
-type ActionConnection = dispatch.SignalConnection[bool]
 
 // 管理 SDL 输入事件到游戏动作状态的转换
 //
@@ -59,7 +38,9 @@ type InputManager struct {
 	// 保存动作在 Pressed、Held、Released 三个阶段的回调信号
 	actionsToFunc map[defs.ActionID][callbackStateCount]*dispatch.Signal[bool]
 	// 保存每个动作当前所处的状态
-	actionStates map[defs.ActionID]ActionState
+	actionStates map[defs.ActionID]defs.ActionState
+	// 保存本帧已经被回调消费的动作
+	consumedActions map[defs.ActionID]bool
 	// 保存键盘或鼠标输入到动作列表的映射
 	inputToActions map[uint32][]defs.ActionID
 	// 窗口坐标系中的鼠标位置
@@ -89,7 +70,8 @@ func NewInputManager(dispatcher *dispatch.Dispatcher, window *sdl.Window, gameSt
 		window:          window,
 		gameState:       gameState,
 		actionsToFunc:   make(map[defs.ActionID][callbackStateCount]*dispatch.Signal[bool]),
-		actionStates:    make(map[defs.ActionID]ActionState),
+		actionStates:    make(map[defs.ActionID]defs.ActionState),
+		consumedActions: make(map[defs.ActionID]bool),
 		inputToActions:  make(map[uint32][]defs.ActionID),
 		mouseWheelDelta: mgl32.Vec2{},
 	}
@@ -117,13 +99,13 @@ func NewInputManager(dispatcher *dispatch.Dispatcher, window *sdl.Window, gameSt
 // 返回指定动作状态的回调注册入口
 //
 // Inactive 不是可触发阶段；传入 Inactive 时会回退到 Pressed，避免调用方绑定到无效列表
-func (m *InputManager) OnAction(actionID defs.ActionID, state ActionState) ActionSink {
+func (m *InputManager) OnAction(actionID defs.ActionID, state defs.ActionState) *defs.ActionSink {
 	if m == nil {
-		return ActionSink{}
+		return nil
 	}
-	if state == Inactive || state < Pressed || state >= Inactive {
+	if state == defs.Inactive || state < defs.Pressed || state >= defs.Inactive {
 		slog.Warn("invalid action callback state, fallback to Pressed", slog.Int("state", int(state)))
-		state = Pressed
+		state = defs.Pressed
 	}
 
 	signals := m.actionsToFunc[actionID]
@@ -144,6 +126,7 @@ func (m *InputManager) Update() {
 	}
 
 	m.advanceActionStates()
+	clear(m.consumedActions)
 	m.mouseWheelDelta = mgl32.Vec2{}
 
 	var event sdl.Event
@@ -173,7 +156,7 @@ func (m *InputManager) IsActionDown(actionID defs.ActionID) bool {
 	}
 
 	state := m.actionStates[actionID]
-	return state == Pressed || state == Held
+	return (state == defs.Pressed || state == defs.Held) && !m.consumedActions[actionID]
 }
 
 // 返回动作是否在本帧刚按下
@@ -182,7 +165,7 @@ func (m *InputManager) IsActionPressed(actionID defs.ActionID) bool {
 		return false
 	}
 
-	return m.actionStates[actionID] == Pressed
+	return m.actionStates[actionID] == defs.Pressed && !m.consumedActions[actionID]
 }
 
 // 返回动作是否在本帧刚释放
@@ -191,7 +174,7 @@ func (m *InputManager) IsActionReleased(actionID defs.ActionID) bool {
 		return false
 	}
 
-	return m.actionStates[actionID] == Released
+	return m.actionStates[actionID] == defs.Released && !m.consumedActions[actionID]
 }
 
 // 返回窗口坐标系中的鼠标位置
@@ -233,22 +216,23 @@ func (m *InputManager) SetEventForwarder(callback func(*sdl.Event)) {
 }
 
 // 返回动作状态快照，供调试面板读取
-func (m *InputManager) ActionStatesDebug() map[defs.ActionID]ActionState {
+func (m *InputManager) ActionStatesDebug() map[defs.ActionID]defs.ActionState {
 	if m == nil {
 		return nil
 	}
 
-	states := make(map[defs.ActionID]ActionState, len(m.actionStates))
-	for actionID, state := range m.actionStates {
-		states[actionID] = state
-	}
+	states := make(map[defs.ActionID]defs.ActionState, len(m.actionStates))
+	maps.Copy(states, m.actionStates)
+	// for actionID, state := range m.actionStates {
+	// 	states[actionID] = state
+	// }
 	return states
 }
 
 // 手动设置动作状态
 //
 // 该方法只用于调试入口，允许调试面板临时触发某个动作状态
-func (m *InputManager) SetActionStateDebug(actionID defs.ActionID, state ActionState) {
+func (m *InputManager) SetActionStateDebug(actionID defs.ActionID, state defs.ActionState) {
 	if m == nil {
 		return
 	}
@@ -264,21 +248,22 @@ func (m *InputManager) SetActionStateDebug(actionID defs.ActionID, state ActionS
 func (m *InputManager) advanceActionStates() {
 	for actionID, state := range m.actionStates {
 		switch state {
-		case Pressed:
-			m.actionStates[actionID] = Held
-		case Released:
-			m.actionStates[actionID] = Inactive
+		case defs.Pressed:
+			m.actionStates[actionID] = defs.Held
+		case defs.Released:
+			m.actionStates[actionID] = defs.Inactive
 		}
 	}
 }
 
+// 触发所有动作状态回调
 func (m *InputManager) dispatchActionCallbacks() {
 	for actionID, state := range m.actionStates {
-		if state == Inactive {
+		if state == defs.Inactive {
 			continue
 		}
 
-		if state < Pressed || state >= Inactive {
+		if state < defs.Pressed || state >= defs.Inactive {
 			continue
 		}
 
@@ -287,6 +272,9 @@ func (m *InputManager) dispatchActionCallbacks() {
 			continue
 		}
 		signals[state].Collect(func(result bool) bool {
+			if result {
+				m.consumedActions[actionID] = true
+			}
 			return result
 		})
 	}
@@ -350,17 +338,17 @@ func (m *InputManager) updateActionState(actionID defs.ActionID, isActive bool, 
 
 	if isActive {
 		if isRepeat {
-			m.actionStates[actionID] = Held
+			m.actionStates[actionID] = defs.Held
 			return
 		}
-		m.actionStates[actionID] = Pressed
+		m.actionStates[actionID] = defs.Pressed
 		return
 	}
 
 	// 如果从未按下却收到松开事件（比如 ImGui 捕获了按下事件但没捕获松开事件，或者窗口焦点切换），
 	// 就跳过 RELEASED 状态，避免产生一次"幽灵释放"
-	if state != Inactive {
-		m.actionStates[actionID] = Released
+	if state != defs.Inactive {
+		m.actionStates[actionID] = defs.Released
 	}
 }
 
@@ -423,7 +411,7 @@ func (m *InputManager) initializeMappings(actionsToKeyName map[string][]string) 
 
 	for actionName, keyNames := range actionsToKeyName {
 		actionID := defs.ActionID(actionName)
-		m.actionStates[actionID] = Inactive
+		m.actionStates[actionID] = defs.Inactive
 
 		for _, keyName := range keyNames {
 			scancode := sdl.GetScancodeFromName(keyName)

@@ -9,23 +9,19 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 )
 
-/**
- * @file viewportManager.go
- * @brief 管理窗口尺寸与游戏逻辑渲染尺寸的转换
- *
- * 此类负责窗口实际尺寸与游戏请求的逻辑渲染尺寸之间的转换，自动计算信箱(letterbox)区域。
- * 当窗口或逻辑尺寸变化时，提供简单接口供渲染器查询当前视口矩形。
- */
+// 管理窗口像素尺寸与逻辑渲染尺寸之间的转换
+//
+// 窗口或逻辑尺寸变化后重新计算 letterbox 视口
 type viewportManager struct {
 	// 当前线程 OpenGL 函数调用入口
 	glCtx gl.Context
 	// 当前视口矩形
 	viewport emath.Rect
-	// window pixel size (SDL_GetWindowSizeInPixels / drawable size)
+	// SDL_GetWindowSizeInPixels 返回的窗口像素尺寸
 	windowSize mgl32.Vec2
-	// logical render size (fixed render target size)
+	// 固定逻辑渲染尺寸
 	logicalSize mgl32.Vec2
-	// dirty flag
+	// 是否需要重新计算视口
 	dirty bool
 }
 
@@ -60,12 +56,11 @@ func (vm *viewportManager) update() {
 		return
 	}
 
-	// 注意：这里的 windowSize 是 drawable 的像素尺寸（高 DPI 下可能大于 SDL_GetWindowSize()）。
-	// glViewport 的单位也是像素，因此整个 letterbox 计算与 viewport 应用都在“像素坐标系”中完成。
+	// windowSize 和 glViewport 均使用像素单位，高 DPI 下可能大于窗口逻辑尺寸
 	metrics := emath.ComputeLetterboxMetrics(vm.windowSize, vm.logicalSize)
 	vm.viewport = metrics.Viewport
 
-	// 设置视口，用的是像素单位
+	// OpenGL 视口使用窗口像素坐标
 	vm.glCtx.Viewport(
 		int32(vm.viewport.Position.X()),
 		int32(vm.viewport.Position.Y()),

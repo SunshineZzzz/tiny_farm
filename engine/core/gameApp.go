@@ -12,6 +12,7 @@ import (
 	"tiny_farm/engine/render"
 	"tiny_farm/engine/resource"
 	"tiny_farm/engine/scene"
+	"tiny_farm/engine/utils/defs"
 	"tiny_farm/engine/utils/dispatch"
 	"tiny_farm/engine/utils/event"
 
@@ -220,20 +221,20 @@ func (a *GameApp) render() {
 	if err := a.renderer.DrawUIRect(mgl32.Vec4{8.0, 24.0, 184.0, 34.0}, mgl32.Vec4{0.02, 0.02, 0.025, 0.92}); err != nil {
 		slog.Error("draw demo text background failed", slog.Any("err", err))
 	}
-	params := &render.TextRenderParams{
-		Color: render.ColorOptions{
+	params := &defs.TextRenderParams{
+		Color: defs.ColorOptions{
 			StartColor:  mgl32.Vec4{1.0, 0.15, 0.1, 1.0},
 			EndColor:    mgl32.Vec4{0.1, 0.85, 1.0, 1.0},
 			UseGradient: true,
 			// 0 表示颜色沿屏幕水平方向从左向右变化
 			AngleRadians: 0.0,
 		},
-		Shadow: &render.ShadowOptions{
+		Shadow: &defs.ShadowOptions{
 			Enabled: true,
 			Offset:  mgl32.Vec2{2.0, 2.0},
 			Color:   mgl32.Vec4{0.0, 0.0, 0.0, 1.0},
 		},
-		Layout: &render.LayoutOptions{
+		Layout: &defs.LayoutOptions{
 			GlyphScale: mgl32.Vec2{1.0, 1.0},
 		},
 	}
@@ -242,7 +243,7 @@ func (a *GameApp) render() {
 		resource.ResourceKey("ui/demo-font"),
 		24,
 		mgl32.Vec2{12.0, 28.0},
-		render.FontPath("assets/fonts/VonwaonBitmap-16px.ttf"),
+		defs.FontPath("assets/fonts/VonwaonBitmap-16px.ttf"),
 		params,
 	); err != nil {
 		slog.Error("draw demo ui text failed", slog.Any("err", err))
@@ -356,6 +357,7 @@ func (a *GameApp) initRuntimeContext() error {
 		a.renderer,
 		a.resourceManager,
 		a.audioPlayer,
+		a.textRenderer,
 		a.camera,
 		a.dispatcher,
 		a.gameState,
@@ -538,7 +540,7 @@ func (a *GameApp) initResourceManager() error {
 	}
 
 	a.resourceManager = manager
-	a.demoTexture = demoTexture
+	a.demoTexture = demoTexture.(*render.Texture)
 	slog.Debug("resource manager init success")
 	slog.Debug("resource texture debug info", slog.Any("textures", manager.TextureDebugInfo()))
 	slog.Debug("resource sound debug info", slog.Any("sounds", manager.SoundDebugInfo()))

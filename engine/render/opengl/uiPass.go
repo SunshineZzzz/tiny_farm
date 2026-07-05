@@ -3,6 +3,7 @@ package opengl
 import (
 	"errors"
 
+	"tiny_farm/engine/utils/defs"
 	emath "tiny_farm/engine/utils/math"
 	gl "tiny_farm/engine/utils/opengl"
 
@@ -11,7 +12,7 @@ import (
 
 // 管理 UI 层最终绘制
 //
-// 当前阶段只提供独立批处理边界，UI 使用 logical 坐标并绘制到默认帧缓冲的 letterbox viewport
+// UI 使用逻辑坐标和独立批处理，最终绘制到默认帧缓冲的 letterbox 视口
 type uiPass struct {
 	// 当前线程 OpenGL 函数调用入口
 	glCtx gl.Context
@@ -70,8 +71,8 @@ func (p *uiPass) queueTextureColor(texture *Texture, dstRect mgl32.Vec4, uvRect 
 	return p.batch.queueTexture(texture, dstRect, uvRect, color)
 }
 
-// 提交带颜色参数的 UI 贴图绘制
-func (p *uiPass) queueTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 将带单色或顶点渐变的贴图加入 UI 队列
+func (p *uiPass) queueTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if p == nil || p.batch == nil {
 		return errors.New("ui pass is nil")
 	}

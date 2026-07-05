@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"tiny_farm/engine/utils/defs"
 	gl "tiny_farm/engine/utils/opengl"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -88,8 +89,8 @@ func (p *scenePass) queueTextureColor(texture *Texture, dstRect mgl32.Vec4, uvRe
 	return p.batch.queueTexture(texture, dstRect, uvRect, color)
 }
 
-// 提交带颜色参数的贴图绘制
-func (p *scenePass) queueTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 将带单色或顶点渐变的贴图加入场景队列
+func (p *scenePass) queueTextureColorOptions(texture *Texture, dstRect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if p == nil || p.batch == nil {
 		return errors.New("scene pass is nil")
 	}

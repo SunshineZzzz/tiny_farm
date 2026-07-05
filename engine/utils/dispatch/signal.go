@@ -42,8 +42,8 @@ type signalSlot[R any] struct {
 }
 
 // 返回绑定到当前信号的注册入口
-func (s *Signal[R]) Sink() SignalSink[R] {
-	return SignalSink[R]{
+func (s *Signal[R]) Sink() *SignalSink[R] {
+	return &SignalSink[R]{
 		signal: s,
 	}
 }
@@ -56,16 +56,16 @@ func SignalSinkOf[R any](signal *Signal[R]) SignalSink[R] {
 }
 
 // 注册一个槽函数
-func (s SignalSink[R]) Connect(callback func() R) SignalConnection[R] {
+func (s *SignalSink[R]) Connect(callback func() R) *SignalConnection[R] {
 	if s.signal == nil || callback == nil {
-		return SignalConnection[R]{}
+		return nil
 	}
 
 	return s.signal.connect(callback)
 }
 
 // 断开当前注册入口上的全部槽函数
-func (s SignalSink[R]) Disconnect() {
+func (s *SignalSink[R]) Disconnect() {
 	if s.signal == nil {
 		return
 	}
@@ -114,8 +114,8 @@ func (s *Signal[R]) Collect(collector func(R) bool) {
 }
 
 // 释放当前槽函数连接
-func (c SignalConnection[R]) Release() {
-	if c.signal == nil || c.slot == nil {
+func (c *SignalConnection[R]) Release() {
+	if c == nil || c.signal == nil || c.slot == nil {
 		return
 	}
 
@@ -125,7 +125,7 @@ func (c SignalConnection[R]) Release() {
 // 创建槽函数节点并追加到连接链表尾部
 //
 // 链表尾部代表最后注册的槽函数，派发时从尾部开始遍历
-func (s *Signal[R]) connect(callback func() R) SignalConnection[R] {
+func (s *Signal[R]) connect(callback func() R) *SignalConnection[R] {
 	slot := &signalSlot[R]{
 		callback:  callback,
 		connected: true,
@@ -138,7 +138,7 @@ func (s *Signal[R]) connect(callback func() R) SignalConnection[R] {
 	}
 	s.tail = slot
 
-	return SignalConnection[R]{
+	return &SignalConnection[R]{
 		signal: s,
 		slot:   slot,
 	}

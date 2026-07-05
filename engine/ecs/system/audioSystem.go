@@ -16,7 +16,7 @@ import (
 
 // 监听音效事件并把事件转换成实际播放调用
 //
-// 当前对齐 copy_source 的简化模型：无实体或实体不可用于定位时播放全局音效，有 Transform 时播放 2D 音效
+// 无实体或实体不可用于定位时播放全局音效，有 Transform 时播放 2D 音效
 type AudioSystem struct {
 	// 当前场景持有的 ECS World
 	world donburi.World

@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"tiny_farm/engine/utils"
+	"tiny_farm/engine/utils/defs"
 	gl "tiny_farm/engine/utils/opengl"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -46,7 +47,7 @@ type spriteCommand struct {
 
 // CPU 端精灵批处理
 //
-// 当前阶段支持纯色矩形和基础贴图，按提交顺序合并连续使用同一纹理的命令
+// 支持纯色矩形和贴图，按提交顺序合并连续使用同一纹理的命令
 type spriteBatch struct {
 	// 当前线程 OpenGL 函数调用入口
 	glCtx gl.Context
@@ -187,11 +188,11 @@ func (b *spriteBatch) clean() {
 
 // 将单色矩形加入本帧批处理队列
 func (b *spriteBatch) queueRect(rect mgl32.Vec4, color mgl32.Vec4) error {
-	return b.queueRectColorOptions(rect, solidColorOptions(color))
+	return b.queueRectColorOptions(rect, defs.SolidColorOptions(color))
 }
 
-// 将带颜色参数的矩形加入本帧批处理队列
-func (b *spriteBatch) queueRectColorOptions(rect mgl32.Vec4, color ColorOptions) error {
+// 将带单色或顶点渐变的矩形加入本帧批处理队列
+func (b *spriteBatch) queueRectColorOptions(rect mgl32.Vec4, color defs.ColorOptions) error {
 	return b.queueSpriteColorOptions(0, false, rect, mgl32.Vec4{0.0, 0.0, 1.0, 1.0}, color)
 }
 
@@ -245,11 +246,11 @@ func (b *spriteBatch) queueQuad(points [4]mgl32.Vec2, color mgl32.Vec4) error {
 
 // 将贴图矩形加入本帧批处理队列
 func (b *spriteBatch) queueTexture(texture *Texture, rect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
-	return b.queueTextureColorOptions(texture, rect, uvRect, solidColorOptions(color))
+	return b.queueTextureColorOptions(texture, rect, uvRect, defs.SolidColorOptions(color))
 }
 
-// 将带颜色参数的贴图矩形加入本帧批处理队列
-func (b *spriteBatch) queueTextureColorOptions(texture *Texture, rect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 将带单色或顶点渐变的贴图矩形加入本帧批处理队列
+func (b *spriteBatch) queueTextureColorOptions(texture *Texture, rect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if texture == nil || texture.id == 0 {
 		return errors.New("texture is nil")
 	}
@@ -287,13 +288,13 @@ func (b *spriteBatch) queueTextureColorOptions(texture *Texture, rect mgl32.Vec4
 	return b.queueSpriteColorOptions(texture.id, true, rect, glUVRect, color)
 }
 
-// 将一个精灵加入本帧队列，纹理命令只合并相邻且纹理一致的段
+// 将单色精灵加入本帧队列，纹理命令只合并相邻且纹理一致的段
 func (b *spriteBatch) queueSprite(texture uint32, useTexture bool, rect mgl32.Vec4, uvRect mgl32.Vec4, color mgl32.Vec4) error {
-	return b.queueSpriteColorOptions(texture, useTexture, rect, uvRect, solidColorOptions(color))
+	return b.queueSpriteColorOptions(texture, useTexture, rect, uvRect, defs.SolidColorOptions(color))
 }
 
-// 将一个带颜色参数的精灵加入本帧队列，纹理命令只合并相邻且纹理一致的段
-func (b *spriteBatch) queueSpriteColorOptions(texture uint32, useTexture bool, rect mgl32.Vec4, uvRect mgl32.Vec4, color ColorOptions) error {
+// 将带单色或顶点渐变的精灵加入本帧队列，纹理命令只合并相邻且纹理一致的段
+func (b *spriteBatch) queueSpriteColorOptions(texture uint32, useTexture bool, rect mgl32.Vec4, uvRect mgl32.Vec4, color defs.ColorOptions) error {
 	if b == nil || b.glCtx == nil {
 		return errors.New("sprite batch is nil")
 	}
@@ -361,8 +362,8 @@ func (b *spriteBatch) queueSpriteColorOptions(texture uint32, useTexture bool, r
 }
 
 // 按矩形四角和渐变参数计算每个顶点颜色
-func gradientVertexColors(points [4]mgl32.Vec2, color ColorOptions) [4]mgl32.Vec4 {
-	color = normalizeColorOptions(&color)
+func gradientVertexColors(points [4]mgl32.Vec2, color defs.ColorOptions) [4]mgl32.Vec4 {
+	color = defs.NormalizeColorOptions(&color)
 	if !color.UseGradient {
 		// 单色调制
 		return [4]mgl32.Vec4{color.StartColor, color.StartColor, color.StartColor, color.StartColor}
@@ -403,8 +404,8 @@ func gradientVertexColors(points [4]mgl32.Vec2, color ColorOptions) [4]mgl32.Vec
 }
 
 // 提交本帧所有已入队矩形
-// textureLocation - 纹理 sampler 位置
-// useTextureLocation - 是否使用纹理 sampler 位置
+//
+// textureLocation 是纹理采样器位置，useTextureLocation 控制是否采样纹理
 func (b *spriteBatch) flush(textureLocation int32, useTextureLocation int32) error {
 	if b == nil || b.glCtx == nil {
 		return errors.New("sprite batch is nil")
@@ -483,7 +484,7 @@ func (b *spriteBatch) reset() {
 	b.commands = b.commands[:0]
 }
 
-// 确保 GPU 缓冲 和 CPU 缓冲至少能容纳 requiredSprites 个精灵
+// 确保 GPU 和 CPU 缓冲至少能容纳 requiredSprites 个精灵
 func (b *spriteBatch) ensureCapacity(requiredSprites int) error {
 	if requiredSprites <= b.capacity {
 		return nil

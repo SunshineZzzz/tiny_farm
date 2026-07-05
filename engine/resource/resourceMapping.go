@@ -15,8 +15,10 @@ type ResourceKey = defs.ResourceKey
 
 // 保存 resource_mapping.json 中当前阶段需要识别的资源路径
 //
-// 当前只解析 texture、sound、music，UI preset 字段先保留给后续阶段使用
+// 当前解析 texture、sound、music 和 UI preset 文件路径
 type resourceMapping struct {
+	UIButtonPresets string `json:"ui_button_presets"`
+	UIImagePresets  string `json:"ui_image_presets"`
 	// sound key -> 文件路径
 	Sound map[ResourceKey]string
 	// music key -> 文件路径
@@ -52,6 +54,16 @@ func parseResourceMapping(data []byte, source string) (*resourceMapping, error) 
 		Sound:   make(map[ResourceKey]string),
 		Music:   make(map[ResourceKey]string),
 		Texture: make(map[ResourceKey]string),
+	}
+	if value, ok := raw["ui_button_presets"]; ok {
+		if err := json.Unmarshal(value, &mapping.UIButtonPresets); err != nil {
+			return nil, fmt.Errorf("parse resource mapping %q: field %q must be string", source, "ui_button_presets")
+		}
+	}
+	if value, ok := raw["ui_image_presets"]; ok {
+		if err := json.Unmarshal(value, &mapping.UIImagePresets); err != nil {
+			return nil, fmt.Errorf("parse resource mapping %q: field %q must be string", source, "ui_image_presets")
+		}
 	}
 
 	var err error

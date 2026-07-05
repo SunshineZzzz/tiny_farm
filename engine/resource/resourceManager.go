@@ -6,6 +6,7 @@ import (
 
 	"tiny_farm/engine/abstract"
 	"tiny_farm/engine/render"
+	"tiny_farm/engine/ui"
 	"tiny_farm/engine/utils/dispatch"
 	"tiny_farm/engine/utils/event"
 
@@ -22,6 +23,8 @@ type ResourceManager struct {
 	audio *audioManager
 	// 负责字体文件和字号缓存
 	fonts *fontManager
+	// UI 样式预设
+	uiPresets *ui.UIPresetManager
 	// 用于广播资源生命周期事件
 	dispatcher *dispatch.Dispatcher
 }
@@ -44,6 +47,7 @@ func NewResourceManager(renderer *render.Renderer, dispatcher *dispatch.Dispatch
 		textures:   textureManager,
 		audio:      newAudioManager(),
 		fonts:      newFontManager(renderer),
+		uiPresets:  ui.NewUIPresetManager(),
 		dispatcher: dispatcher,
 	}, nil
 }
@@ -75,7 +79,25 @@ func (m *ResourceManager) LoadResources(path string) error {
 			return fmt.Errorf("load resources %q: %w", path, err)
 		}
 	}
+	if mapping.UIImagePresets != "" {
+		if err := m.uiPresets.LoadImagePresets(mapping.UIImagePresets); err != nil {
+			return err
+		}
+	}
+	if mapping.UIButtonPresets != "" {
+		if err := m.uiPresets.LoadButtonPresets(mapping.UIButtonPresets); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// 返回启动阶段加载的 UI 样式预设
+func (m *ResourceManager) UIPresetManager() *ui.UIPresetManager {
+	if m == nil {
+		return nil
+	}
+	return m.uiPresets
 }
 
 // 释放资源管理器持有的全部缓存
@@ -97,7 +119,7 @@ func (m *ResourceManager) Clear() {
 }
 
 // 加载纹理资源，如果命中缓存则直接返回已有纹理
-func (m *ResourceManager) LoadTexture(key ResourceKey, paths ...string) (*render.Texture, error) {
+func (m *ResourceManager) LoadTexture(key ResourceKey, paths ...string) (abstract.ITexture, error) {
 	if m == nil || m.textures == nil {
 		return nil, errors.New("resource manager texture manager is nil")
 	}
