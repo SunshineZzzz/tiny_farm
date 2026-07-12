@@ -42,16 +42,16 @@ type soundOverride struct {
 
 // 管理可交互元素的状态、视觉、行为回调和音效反馈
 //
-// 当前保留枚举状态实现，但提供与参考版等价的四态图片、行为挂载和拖拽能力
+// 当前使用状态对象处理交互迁移，并保留枚举状态作为对外查询和视觉映射
 type UIInteractive struct {
 	// 提供布局、渲染和鼠标事件挂接能力
 	*UIElement
 	// 当前交互状态
 	state UIState
-	// 下一次更新时应用的交互状态
-	nextState UIState
-	// 是否存在等待应用的交互状态
-	hasNextState bool
+	// 当前状态对象，负责处理状态内的事件规则
+	stateObject interactionState
+	// 下一次更新时应用的状态对象
+	nextState interactionState
 	// 是否接受鼠标交互
 	enabled bool
 	// 图片集合，键通常使用四个 UIImage 常量
@@ -80,11 +80,13 @@ type UIInteractive struct {
 func NewUIInteractive(position, size mgl32.Vec2, audio abstract.IAudioPlayer, inputs ...abstract.IActionInput) *UIInteractive {
 	interactive := &UIInteractive{
 		UIElement:   NewUIElement(position, size),
+		state:       UIStateNormal,
 		enabled:     true,
 		images:      make(map[UIState]ImageSpec),
 		audio:       audio,
 		soundEvents: make(map[string]soundOverride),
 	}
+	interactive.stateObject = newInteractionState(UIStateNormal)
 	if len(inputs) > 0 {
 		interactive.input = inputs[0]
 	}
@@ -95,8 +97,8 @@ func NewUIInteractive(position, size mgl32.Vec2, audio abstract.IAudioPlayer, in
 		interactive.MousePressed,
 		interactive.MouseReleased,
 	)
-	interactive.SetUpdateSelf(func(*UIElement, float64) {
-		interactive.applyNextState()
+	interactive.SetUpdateSelf(func(_ *UIElement, deltaTime float64) {
+		interactive.updateState(deltaTime)
 		interactive.updateDrag()
 	})
 	interactive.SetRenderUI(interactive.render)
@@ -125,7 +127,7 @@ func (i *UIInteractive) SetEnabled(enabled bool) {
 	i.SetInteractive(enabled)
 	i.pressed = false
 	i.dragging = false
-	i.hasNextState = false
+	i.nextState = nil
 	if enabled {
 		i.SetState(UIStateNormal)
 	} else {
@@ -147,24 +149,21 @@ func (i *UIInteractive) SetStateCallback(callback func(UIState)) {
 	}
 }
 
-// 设置当前状态并同步状态图片和回调
+// 设置当前状态并同步状态图片和回调，同步
 func (i *UIInteractive) SetState(state UIState) {
 	if i == nil || i.state == state {
 		return
 	}
-	i.state = state
-	if i.onState != nil {
-		i.onState(state)
-	}
+	i.nextState = nil
+	i.setStateObject(newInteractionState(state))
 }
 
-// 设置下一次更新时应用的交互状态
+// 设置下一次更新时应用的交互状态吗，延迟切换状态，比如状态机切换状态
 func (i *UIInteractive) SetNextState(state UIState) {
 	if i == nil {
 		return
 	}
-	i.nextState = state
-	i.hasNextState = true
+	i.nextState = newInteractionState(state)
 }
 
 // 添加或替换指定标识的状态图片
@@ -321,13 +320,12 @@ func (i *UIInteractive) SetPositionByScreen(screenPosition mgl32.Vec2) {
 
 // 处理鼠标进入事件并切换到悬停状态
 func (i *UIInteractive) MouseEnter() {
-	if i == nil || !i.enabled {
+	if i == nil || !i.enabled || i.stateObject == nil {
 		return
 	}
-	if !i.pressed {
-		i.SetState(UIStateHover)
-		i.PlaySoundEvent(UISoundEventHover)
-	}
+	// 因为状态迁移通过 SetNextState() 延迟保存，新的鼠标事件到来时，要先应用之前等待中的状态，否则可能由错误的状态对象处理事件。
+	i.applyNextState()
+	i.stateObject.onMouseEnter(i)
 	for _, behavior := range i.behaviors {
 		behavior.OnHoverEnter(i)
 	}
@@ -335,12 +333,11 @@ func (i *UIInteractive) MouseEnter() {
 
 // 处理鼠标离开事件，未按下时恢复到默认状态
 func (i *UIInteractive) MouseExit() {
-	if i == nil || !i.enabled {
+	if i == nil || !i.enabled || i.stateObject == nil {
 		return
 	}
-	if !i.pressed {
-		i.SetState(UIStateNormal)
-	}
+	i.applyNextState()
+	i.stateObject.onMouseExit(i)
 	for _, behavior := range i.behaviors {
 		behavior.OnHoverExit(i)
 	}
@@ -348,14 +345,14 @@ func (i *UIInteractive) MouseExit() {
 
 // 处理鼠标按下事件并开始跟踪潜在拖拽
 func (i *UIInteractive) MousePressed() {
-	if i == nil || !i.enabled {
+	if i == nil || !i.enabled || i.stateObject == nil {
 		return
 	}
+	i.applyNextState()
 	i.pressed = true
 	i.dragging = false
 	i.lastMousePosition = i.mousePosition()
-	i.SetState(UIStatePressed)
-	i.PlaySoundEvent(UISoundEventClick)
+	i.stateObject.onMousePressed(i)
 	for _, behavior := range i.behaviors {
 		behavior.OnPressed(i)
 		behavior.OnDragBegin(i, i.lastMousePosition)
@@ -364,9 +361,10 @@ func (i *UIInteractive) MousePressed() {
 
 // 处理鼠标释放事件并结束拖拽，仅在元素范围内释放时触发点击
 func (i *UIInteractive) MouseReleased(inside bool) {
-	if i == nil || !i.enabled {
+	if i == nil || !i.enabled || i.stateObject == nil {
 		return
 	}
+	i.applyNextState()
 	position := i.mousePosition()
 	for _, behavior := range i.behaviors {
 		behavior.OnReleased(i, inside)
@@ -374,14 +372,12 @@ func (i *UIInteractive) MouseReleased(inside bool) {
 	}
 	i.pressed = false
 	i.dragging = false
+	i.stateObject.onMouseReleased(i, inside)
 	if inside {
-		i.SetState(UIStateHover)
 		for _, behavior := range i.behaviors {
 			behavior.OnClick(i)
 		}
-		return
 	}
-	i.SetState(UIStateNormal)
 }
 
 // 跟踪按下后的鼠标位移并通知拖拽行为
@@ -401,26 +397,32 @@ func (i *UIInteractive) updateDrag() {
 	i.lastMousePosition = position
 }
 
-// 应用等待中的交互状态
-func (i *UIInteractive) applyNextState() {
-	if i == nil || !i.hasNextState {
+// 应用等待中的交互状态并更新当前状态
+func (i *UIInteractive) updateState(deltaTime float64) {
+	if i == nil {
 		return
 	}
-	state := i.nextState
-	i.hasNextState = false
-	i.SetState(state)
+	i.applyNextState()
+	if i.stateObject != nil {
+		i.stateObject.update(i, deltaTime)
+	}
+}
+
+// 应用等待中的交互状态
+func (i *UIInteractive) applyNextState() {
+	if i == nil {
+		return
+	}
+	if i.nextState != nil {
+		state := i.nextState
+		i.nextState = nil
+		i.setStateObject(state)
+	}
 }
 
 // 绘制当前状态选择的图片
 func (i *UIInteractive) render(uiCtx *uiContext) error {
-	if i == nil {
-		return nil
-	}
-	image, ok := i.images[i.state]
-	if !ok {
-		return nil
-	}
-	return drawImageSpec(uiCtx, image, i.Bounds().RectToVec4())
+	return i.drawStateImage(uiCtx)
 }
 
 // 返回输入源当前鼠标位置，未配置输入源时返回上一次位置
@@ -443,5 +445,44 @@ func defaultSoundForEvent(event string) defs.ResourceKey {
 		return defs.ResourceKey("ui_click")
 	default:
 		return ""
+	}
+}
+
+// 绘制当前状态对应的图片，缺失时回退普通状态图片
+func (i *UIInteractive) drawStateImage(uiCtx *uiContext) error {
+	if i == nil {
+		return nil
+	}
+	image, ok := i.images[i.state]
+	if !ok && i.state != UIStateNormal {
+		image, ok = i.images[UIStateNormal]
+	}
+	if !ok {
+		return nil
+	}
+	return drawImageSpec(uiCtx, image, i.Bounds().RectToVec4())
+}
+
+// 立即切换到指定状态对象并同步公开状态
+func (i *UIInteractive) setStateObject(state interactionState) {
+	if i == nil || state == nil {
+		return
+	}
+	stateID := state.id()
+	if i.stateObject != nil && i.state == stateID {
+		return
+	}
+	i.stateObject = state
+	state.enter(i)
+}
+
+// 应用状态枚举并通知视觉更新回调
+func (i *UIInteractive) applyState(state UIState) {
+	if i == nil || i.state == state {
+		return
+	}
+	i.state = state
+	if i.onState != nil {
+		i.onState(state)
 	}
 }

@@ -29,34 +29,47 @@ type IInteractionBehavior interface {
 }
 
 // 提供全部交互行为方法的空实现，具体行为可通过嵌入按需覆盖
-type BaseInteractionBehavior struct{}
+type BaseInteractionBehavior struct {
+}
 
-// 默认不处理行为挂载事件
-func (BaseInteractionBehavior) OnAttach(*UIInteractive) {}
+// 确保 BaseInteractionBehavior 实现 IInteractionBehavior 接口
+var _ IInteractionBehavior = (*BaseInteractionBehavior)(nil)
 
-// 默认不处理鼠标进入事件
-func (BaseInteractionBehavior) OnHoverEnter(*UIInteractive) {}
+// 在行为挂载到交互元素时调用
+func (BaseInteractionBehavior) OnAttach(*UIInteractive) {
+}
 
-// 默认不处理鼠标离开事件
-func (BaseInteractionBehavior) OnHoverExit(*UIInteractive) {}
+// 在鼠标进入元素范围时调用
+func (BaseInteractionBehavior) OnHoverEnter(*UIInteractive) {
+}
 
-// 默认不处理鼠标按下事件
-func (BaseInteractionBehavior) OnPressed(*UIInteractive) {}
+// 在鼠标离开元素范围时调用
+func (BaseInteractionBehavior) OnHoverExit(*UIInteractive) {
+}
 
-// 默认不处理鼠标释放事件
-func (BaseInteractionBehavior) OnReleased(*UIInteractive, bool) {}
+// 在鼠标按键于元素上按下时调用
+func (BaseInteractionBehavior) OnPressed(*UIInteractive) {
+}
 
-// 默认不处理点击成立事件
-func (BaseInteractionBehavior) OnClick(*UIInteractive) {}
+// 在鼠标按键释放时调用，第二个参数表示是否在原元素内释放
+func (BaseInteractionBehavior) OnReleased(*UIInteractive, bool) {
+}
 
-// 默认不处理拖拽开始事件
-func (BaseInteractionBehavior) OnDragBegin(*UIInteractive, mgl32.Vec2) {}
+// 在鼠标按键于原元素内释放并成立点击时调用
+func (BaseInteractionBehavior) OnClick(*UIInteractive) {
+}
 
-// 默认不处理拖拽更新事件
-func (BaseInteractionBehavior) OnDragUpdate(*UIInteractive, mgl32.Vec2, mgl32.Vec2) {}
+// 在元素开始跟踪潜在拖拽时调用，位置使用逻辑屏幕坐标
+func (BaseInteractionBehavior) OnDragBegin(*UIInteractive, mgl32.Vec2) {
+}
 
-// 默认不处理拖拽结束事件
-func (BaseInteractionBehavior) OnDragEnd(*UIInteractive, mgl32.Vec2, bool) {}
+// 在拖拽位置变化时调用，参数依次为当前位置和本次位移
+func (BaseInteractionBehavior) OnDragUpdate(*UIInteractive, mgl32.Vec2, mgl32.Vec2) {
+}
+
+// 在拖拽跟踪结束时调用，最后一个参数表示是否在原元素内释放
+func (BaseInteractionBehavior) OnDragEnd(*UIInteractive, mgl32.Vec2, bool) {
+}
 
 // 通过回调扩展任意交互事件
 type CallbackBehavior struct {

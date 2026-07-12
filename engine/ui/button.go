@@ -32,6 +32,16 @@ func NewButton(position, size mgl32.Vec2, skin *ButtonSkin, audio abstract.IAudi
 		UIInteractive: NewUIInteractive(position, size, audio),
 		skin:          skin,
 	}
+	button.AddImage(UIStateNormal, *skin.Normal)
+	if skin.Hover != nil {
+		button.AddImage(UIStateHover, *skin.Hover)
+	}
+	if skin.Pressed != nil {
+		button.AddImage(UIStatePressed, *skin.Pressed)
+	}
+	if skin.Disabled != nil {
+		button.AddImage(UIStateDisabled, *skin.Disabled)
+	}
 	if style := skin.Label; style != nil {
 		fontSize := style.FontSize
 		if fontSize <= 0 {
@@ -104,8 +114,7 @@ func (b *Button) render(uiCtx *uiContext) error {
 	if b == nil || uiCtx == nil {
 		return errors.New("button or ui context is nil")
 	}
-	spec := b.imageForState()
-	if err := drawImageSpec(uiCtx, spec, b.Bounds().RectToVec4()); err != nil {
+	if err := b.drawStateImage(uiCtx); err != nil {
 		return err
 	}
 	if b.label == nil {
@@ -118,25 +127,6 @@ func (b *Button) render(uiCtx *uiContext) error {
 	position := b.ScreenPosition().Add(b.LayoutSize().Sub(size).Mul(0.5))
 	b.label.SetPosition(position)
 	return b.label.RenderSelf(uiCtx)
-}
-
-// 返回当前交互状态对应的图片，未配置时回退普通状态图片
-func (b *Button) imageForState() ImageSpec {
-	switch b.State() {
-	case UIStateHover:
-		if b.skin.Hover != nil {
-			return *b.skin.Hover
-		}
-	case UIStatePressed:
-		if b.skin.Pressed != nil {
-			return *b.skin.Pressed
-		}
-	case UIStateDisabled:
-		if b.skin.Disabled != nil {
-			return *b.skin.Disabled
-		}
-	}
-	return *b.skin.Normal
 }
 
 // 返回按钮文字实际使用的颜色，零值按白色处理

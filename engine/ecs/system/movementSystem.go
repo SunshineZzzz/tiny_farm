@@ -37,6 +37,10 @@ func (s *MovementSystem) Update(world donburi.World, deltaTime float64) {
 	for entry := range s.query.Iter(world) {
 		transform := component.Transform.Get(entry)
 		velocity := component.Velocity.Get(entry)
+		before := transform.Position
 		transform.Position = transform.Position.Add(velocity.Value.Mul(scaledDeltaTime))
+		if transform.Position != before {
+			entry.AddComponent(component.TransformDirtyTag)
+		}
 	}
 }
