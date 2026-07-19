@@ -15,6 +15,32 @@ type CollisionResult struct {
 	DynamicColliders []donburi.Entity
 }
 
+// 静态扫掠方向
+type SweepDirection int
+
+const (
+	// 向北移动
+	SweepDirectionNorth SweepDirection = iota
+	// 向南移动
+	SweepDirectionSouth
+	// 向东移动
+	SweepDirectionEast
+	// 向西移动
+	SweepDirectionWest
+)
+
+// 静态瓦片扫掠结果
+type SweepResult struct {
+	// 裁剪后的碰撞矩形
+	Rect emath.Rect
+	// 是否命中方向阻挡边界
+	HitThinWall bool
+	// 是否命中完整阻挡瓦片边界
+	HitSolid bool
+	// 首个命中边界和扫掠范围
+	HitInfo SweepHitInfo
+}
+
 // 空间索引管理器，统一管理静态瓦片网格和动态实体网格
 type SpatialIndexManager struct {
 	// 静态瓦片网格
@@ -152,6 +178,39 @@ func (m *SpatialIndexManager) CheckCollision(rect emath.Rect) CollisionResult {
 		HasStaticCollision: m.staticGrid.HasSolidInRect(rect),
 		DynamicColliders:   m.QueryColliders(rect),
 	}
+}
+
+// 沿指定方向扫掠静态瓦片边界并裁剪目标矩形
+func (m *SpatialIndexManager) ResolveStaticSweep(startRect, targetRect emath.Rect, direction SweepDirection) SweepResult {
+	result := SweepResult{
+		Rect:    targetRect,
+		HitInfo: newSweepHitInfo(),
+	}
+	if !m.staticGrid.IsInitialized() {
+		return result
+	}
+
+	vertical := direction == SweepDirectionNorth || direction == SweepDirectionSouth
+	positive := direction == SweepDirectionSouth || direction == SweepDirectionEast
+	var hit bool
+	var resolvedPosition float32
+	if vertical {
+		hit, resolvedPosition, result.HitInfo = m.staticGrid.SweepVertical(startRect, targetRect, positive)
+	} else {
+		hit, resolvedPosition, result.HitInfo = m.staticGrid.SweepHorizontal(startRect, targetRect, positive)
+	}
+	if !hit {
+		return result
+	}
+
+	result.HitSolid = result.HitInfo.HitSolid
+	result.HitThinWall = !result.HitInfo.HitSolid
+	if vertical {
+		result.Rect.Position[1] = resolvedPosition
+	} else {
+		result.Rect.Position[0] = resolvedPosition
+	}
+	return result
 }
 
 // 对 broadphase 返回的候选实体做精确碰撞检测，也就是 narrowphase

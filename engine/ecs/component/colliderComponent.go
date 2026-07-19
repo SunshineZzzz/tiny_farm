@@ -9,7 +9,7 @@ import (
 type AABBColliderComponent struct {
 	// 碰撞盒尺寸，单位为世界坐标
 	Size mgl32.Vec2
-	// 相对 Transform 位置的中心点偏移
+	// 从 Transform.Position 到碰撞器中心的偏移量
 	Offset mgl32.Vec2
 }
 
@@ -17,7 +17,7 @@ type AABBColliderComponent struct {
 type CircleColliderComponent struct {
 	// 碰撞圆半径，单位为世界坐标
 	Radius float32
-	// 相对 Transform 位置的圆心偏移
+	// 从 Transform.Position 到碰撞器中心的偏移量
 	Offset mgl32.Vec2
 }
 

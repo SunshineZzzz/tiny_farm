@@ -71,6 +71,50 @@ type StaticTileGrid struct {
 	cells []TileCellData
 }
 
+// 静态扫掠命中的瓦片边界信息，用于调试和结果分析
+type SweepHitInfo struct {
+	// 是否命中SOLID瓦片
+	HitSolid bool
+	// 表示命中了哪一条水平边界
+	// 行 0     [ ][ ][ ]
+	// 边界行 1 ─────────
+	// 行 1     [ ][ ][ ]
+	BoundaryRow int
+	// 表示命中了哪一条垂直边界
+	// 列 0 │ 列 1
+	// [ ]  │ [ ]
+	BoundaryCol int
+	// 角色横向移动时，记录角色高度覆盖了哪些行
+	RowStart int
+	RowEnd   int
+	// 角色纵向移动时，记录角色宽度覆盖了哪些列
+	ColStart int
+	ColEnd   int
+}
+
+// 创建尚未命中任何瓦片边界的扫掠信息
+func newSweepHitInfo() SweepHitInfo {
+	return SweepHitInfo{
+		BoundaryRow: -1,
+		BoundaryCol: -1,
+		RowStart:    -1,
+		RowEnd:      -1,
+		ColStart:    -1,
+		ColEnd:      -1,
+	}
+}
+
+// 瓦片边界两侧的综合阻挡信息
+// 它与 SweepHitInfo 的区别是：
+// edgeBlockInfo：底层检查一条边界时使用的临时结果
+// SweepHitInfo：sweep 最终返回给上层的命中和调试信息
+type edgeBlockInfo struct {
+	// 表示这条边界能不能通过，无论是薄墙还是完整 SOLID，都可能使它变成 true
+	blocked bool
+	// 表示造成阻挡的瓦片是不是完整 SOLID
+	hasSolid bool
+}
+
 // 初始化静态网格
 func (g *StaticTileGrid) Initialize(mapSize, tileSize Coord) {
 	g.mapSize = Coord{X: max(mapSize.X, 0.0), Y: max(mapSize.Y, 0.0)}
@@ -206,6 +250,184 @@ func (g *StaticTileGrid) RectAtWorldPos(worldPos mgl32.Vec2) emath.Rect {
 		Position: mgl32.Vec2{float32(coord.X * g.tileSize.X), float32(coord.Y * g.tileSize.Y)},
 		Size:     mgl32.Vec2{float32(g.tileSize.X), float32(g.tileSize.Y)},
 	}
+}
+
+// 沿 Y 轴扫掠矩形并返回首个阻挡边界裁剪后的位置
+// 是否撞到阻挡，裁剪后矩形左上角的 Y，命中的边界信息
+func (g *StaticTileGrid) SweepVertical(startRect, targetRect emath.Rect, movingSouth bool) (bool, float32, SweepHitInfo) {
+	hitInfo := newSweepHitInfo()
+	if !g.IsInitialized() {
+		return false, targetRect.Position.Y(), hitInfo
+	}
+
+	startEdge := startRect.Position.Y()
+	targetEdge := targetRect.Position.Y()
+	if movingSouth {
+		startEdge += startRect.Size.Y()
+		targetEdge += targetRect.Size.Y()
+	}
+	// 如果前沿几乎没有移动，就直接返回。
+	if math.Abs(float64(targetEdge-startEdge)) < float64(gridEpsilon) {
+		return false, targetRect.Position.Y(), hitInfo
+	}
+
+	// 计算矩形覆盖的列
+	minX := min(startRect.Position.X(), targetRect.Position.X())
+	maxX := max(
+		startRect.Position.X()+startRect.Size.X(),
+		targetRect.Position.X()+targetRect.Size.X(),
+	) - gridEpsilon
+	colStart := int(math.Floor(float64(minX / float32(g.tileSize.X))))
+	colEnd := int(math.Floor(float64(maxX / float32(g.tileSize.X))))
+	hitInfo.ColStart = colStart
+	hitInfo.ColEnd = colEnd
+
+	// 向下扫描
+	tileHeight := float32(g.tileSize.Y)
+	if movingSouth {
+		firstBoundary := int(math.Ceil(float64(startEdge / tileHeight)))
+		lastBoundary := int(math.Floor(float64(targetEdge / tileHeight)))
+		// 假设 tile 高度为 32，矩形底边从 y=20 移动到 y=100，途中会跨过：y=32 → y=64 → y=96
+		// 循环从上到下依次检查：boundaryRow = 1、2、3
+		for boundaryRow := firstBoundary; boundaryRow <= lastBoundary; boundaryRow++ {
+			// 检查水平边界两侧是否存在方向阻挡
+			info := g.horizontalEdgeBlockInfo(boundaryRow, colStart, colEnd)
+			if !info.blocked {
+				continue
+			}
+			hitInfo.BoundaryRow = boundaryRow
+			hitInfo.HitSolid = info.hasSolid
+			resolvedBottom := float32(boundaryRow)*tileHeight - gridEpsilon
+			return true, resolvedBottom - startRect.Size.Y(), hitInfo
+		}
+		return false, targetRect.Position.Y(), hitInfo
+	}
+
+	// 向上扫描
+	firstBoundary := int(math.Floor(float64(startEdge / tileHeight)))
+	lastBoundary := int(math.Ceil(float64(targetEdge / tileHeight)))
+	for boundaryRow := firstBoundary; boundaryRow >= lastBoundary; boundaryRow-- {
+		info := g.horizontalEdgeBlockInfo(boundaryRow, colStart, colEnd)
+		if !info.blocked {
+			continue
+		}
+		hitInfo.BoundaryRow = boundaryRow
+		hitInfo.HitSolid = info.hasSolid
+		return true, float32(boundaryRow)*tileHeight + gridEpsilon, hitInfo
+	}
+	return false, targetRect.Position.Y(), hitInfo
+}
+
+// 沿 X 轴扫掠矩形并返回首个阻挡边界裁剪后的位置
+func (g *StaticTileGrid) SweepHorizontal(startRect, targetRect emath.Rect, movingEast bool) (bool, float32, SweepHitInfo) {
+	hitInfo := newSweepHitInfo()
+	if !g.IsInitialized() {
+		return false, targetRect.Position.X(), hitInfo
+	}
+
+	startEdge := startRect.Position.X()
+	targetEdge := targetRect.Position.X()
+	if movingEast {
+		startEdge += startRect.Size.X()
+		targetEdge += targetRect.Size.X()
+	}
+	if math.Abs(float64(targetEdge-startEdge)) < float64(gridEpsilon) {
+		return false, targetRect.Position.X(), hitInfo
+	}
+
+	minY := min(startRect.Position.Y(), targetRect.Position.Y())
+	maxY := max(
+		startRect.Position.Y()+startRect.Size.Y(),
+		targetRect.Position.Y()+targetRect.Size.Y(),
+	) - gridEpsilon
+	rowStart := int(math.Floor(float64(minY / float32(g.tileSize.Y))))
+	rowEnd := int(math.Floor(float64(maxY / float32(g.tileSize.Y))))
+	hitInfo.RowStart = rowStart
+	hitInfo.RowEnd = rowEnd
+
+	tileWidth := float32(g.tileSize.X)
+	if movingEast {
+		firstBoundary := int(math.Ceil(float64(startEdge / tileWidth)))
+		lastBoundary := int(math.Floor(float64(targetEdge / tileWidth)))
+		for boundaryCol := firstBoundary; boundaryCol <= lastBoundary; boundaryCol++ {
+			info := g.verticalEdgeBlockInfo(boundaryCol, rowStart, rowEnd)
+			if !info.blocked {
+				continue
+			}
+			hitInfo.BoundaryCol = boundaryCol
+			hitInfo.HitSolid = info.hasSolid
+			resolvedRight := float32(boundaryCol)*tileWidth - gridEpsilon
+			return true, resolvedRight - startRect.Size.X(), hitInfo
+		}
+		return false, targetRect.Position.X(), hitInfo
+	}
+
+	firstBoundary := int(math.Floor(float64(startEdge / tileWidth)))
+	lastBoundary := int(math.Ceil(float64(targetEdge / tileWidth)))
+	for boundaryCol := firstBoundary; boundaryCol >= lastBoundary; boundaryCol-- {
+		info := g.verticalEdgeBlockInfo(boundaryCol, rowStart, rowEnd)
+		if !info.blocked {
+			continue
+		}
+		hitInfo.BoundaryCol = boundaryCol
+		hitInfo.HitSolid = info.hasSolid
+		return true, float32(boundaryCol)*tileWidth + gridEpsilon, hitInfo
+	}
+	return false, targetRect.Position.X(), hitInfo
+}
+
+// 检查竖直瓦片边界两侧是否存在方向阻挡
+func (g *StaticTileGrid) verticalEdgeBlockInfo(boundaryCol, rowStart, rowEnd int) edgeBlockInfo {
+	// 同一条竖直边界可以由两侧任意一个 tile 声明阻挡
+	leftCol := boundaryCol - 1
+	rightCol := boundaryCol
+	info := edgeBlockInfo{}
+	for row := rowStart; row <= rowEnd; row++ {
+		if row < 0 || row >= g.mapSize.Y {
+			continue
+		}
+		if leftCol >= 0 && leftCol < g.mapSize.X {
+			tileType := g.TileType(Coord{X: leftCol, Y: row})
+			info.blocked = info.blocked || HasTileFlag(tileType, TileBlockE)
+			info.hasSolid = info.hasSolid || HasAllTileFlags(tileType, TileSolidFlag)
+		}
+		if rightCol >= 0 && rightCol < g.mapSize.X {
+			tileType := g.TileType(Coord{X: rightCol, Y: row})
+			info.blocked = info.blocked || HasTileFlag(tileType, TileBlockW)
+			info.hasSolid = info.hasSolid || HasAllTileFlags(tileType, TileSolidFlag)
+		}
+		if info.blocked {
+			return info
+		}
+	}
+	return info
+}
+
+// 检查水平瓦片边界两侧是否存在方向阻挡
+func (g *StaticTileGrid) horizontalEdgeBlockInfo(boundaryRow, colStart, colEnd int) edgeBlockInfo {
+	// 同一条水平边界可以由两侧任意一个 tile 声明阻挡
+	aboveRow := boundaryRow - 1
+	belowRow := boundaryRow
+	info := edgeBlockInfo{}
+	for col := colStart; col <= colEnd; col++ {
+		if col < 0 || col >= g.mapSize.X {
+			continue
+		}
+		if belowRow >= 0 && belowRow < g.mapSize.Y {
+			tileType := g.TileType(Coord{X: col, Y: belowRow})
+			info.blocked = info.blocked || HasTileFlag(tileType, TileBlockN)
+			info.hasSolid = info.hasSolid || HasAllTileFlags(tileType, TileSolidFlag)
+		}
+		if aboveRow >= 0 && aboveRow < g.mapSize.Y {
+			tileType := g.TileType(Coord{X: col, Y: aboveRow})
+			info.blocked = info.blocked || HasTileFlag(tileType, TileBlockS)
+			info.hasSolid = info.hasSolid || HasAllTileFlags(tileType, TileSolidFlag)
+		}
+		if info.blocked {
+			return info
+		}
+	}
+	return info
 }
 
 // 判断瓦片坐标是否位于地图范围内

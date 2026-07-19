@@ -36,27 +36,53 @@ func BuildColliderShape(entry *donburi.Entry) (ColliderShape, bool) {
 		return ColliderShape{}, false
 	}
 	transform := component.Transform.Get(entry)
+	return BuildColliderShapeByTransformPosition(entry, transform.Position)
+}
+
+// 根据实体的碰撞器组件，构造实体位于指定 Transform 世界位置时的碰撞形状
+func BuildColliderShapeByTransformPosition(entry *donburi.Entry, position mgl32.Vec2) (ColliderShape, bool) {
+	if entry == nil || !entry.Valid() {
+		return ColliderShape{}, false
+	}
 	if entry.HasComponent(component.AABBCollider) {
 		collider := component.AABBCollider.Get(entry)
-		center := transform.Position.Add(collider.Offset)
 		return ColliderShape{
 			Type: ColliderShapeRect,
-			Rect: emath.Rect{
-				// 因为当前 Rect.Position 表示左上角，而碰撞器使用中心点定义，所以需要减去一半尺寸。
-				Position: center.Sub(collider.Size.Mul(0.5)),
-				Size:     collider.Size,
-			},
+			Rect: AABBBoundsRectByTransformPosition(position, *collider),
 		}, true
 	}
 	if entry.HasComponent(component.CircleCollider) {
 		collider := component.CircleCollider.Get(entry)
 		return ColliderShape{
 			Type:   ColliderShapeCircle,
-			Center: transform.Position.Add(collider.Offset),
+			Center: CircleCenterByTransformPosition(position, *collider),
 			Radius: collider.Radius,
 		}, true
 	}
 	return ColliderShape{}, false
+}
+
+// 计算 AABB 碰撞器位于指定 Transform 世界位置时的世界矩形
+func AABBBoundsRectByTransformPosition(position mgl32.Vec2, collider component.AABBColliderComponent) emath.Rect {
+	center := position.Add(collider.Offset)
+	return emath.Rect{
+		Position: center.Sub(collider.Size.Mul(0.5)),
+		Size:     collider.Size,
+	}
+}
+
+// 计算圆形碰撞器位于指定 Transform 世界位置时的世界圆心
+func CircleCenterByTransformPosition(position mgl32.Vec2, collider component.CircleColliderComponent) mgl32.Vec2 {
+	return position.Add(collider.Offset)
+}
+
+// 计算圆形碰撞器位于指定 Transform 世界位置时的外接矩形
+func CircleBoundsRectByTransformPosition(position mgl32.Vec2, collider component.CircleColliderComponent) emath.Rect {
+	radius := mgl32.Vec2{collider.Radius, collider.Radius}
+	return emath.Rect{
+		Position: CircleCenterByTransformPosition(position, collider).Sub(radius),
+		Size:     radius.Mul(2.0),
+	}
 }
 
 // 判断查询矩形与碰撞形状是否相交
